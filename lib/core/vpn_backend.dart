@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
@@ -32,6 +34,12 @@ abstract class VpnBackend {
 
   /// Последние строки журнала ядра (только компьютер).
   List<String> get logs => const [];
+
+  /// Журнал ядра (на Android читается из logcat).
+  Future<List<String>> fetchLogs() async => logs;
+
+  /// Сколько байт ушло/пришло через сервер с прошлого вызова. null — статистика недоступна.
+  Future<({int up, int down})?> trafficDelta() async => null;
 
   static VpnBackend create() {
     if (Plat.web) return DemoVpnBackend();
@@ -78,11 +86,68 @@ class MobileVpnBackend implements VpnBackend {
       _ctrl.add(const VpnStatus(VpnState.error, 'Нужно разрешить подключение VPN'));
       return;
     }
-    final config =
-        XrayConfigBuilder.build(server,
-            routing: routing, inbound: InboundMode.tunMobile, settings: settings, lite: Plat.ios);
+    final st = settings ?? AppSettings();
+    final config = XrayConfigBuilder.build(server,
+        routing: routing,
+        inbound: InboundMode.tunMobile,
+        settings: st,
+        lite: Plat.ios,
+        stats: Plat.android);
     _ctrl.add(const VpnStatus(VpnState.connecting));
-    await _ch.invokeMethod('start', {'config': jsonEncode(config), 'name': server.name});
+    await _ch.invokeMethod('start', {
+      'config': jsonEncode(config),
+      'name': server.name,
+      'splitMode': st.splitMode.name,
+      'splitApps': st.splitApps,
+    });
+  }
+
+  @override
+  Future<({int up, int down})?> trafficDelta() async {
+    if (!Plat.android) return null;
+    try {
+      final s = await _ch.invokeMethod<String>('stats') ?? '';
+      return parseLibStats(s);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Формат libv2ray: «tag,uplink,123;tag,downlink,456;» (счётчики сбрасываются при чтении).
+  static ({int up, int down}) parseLibStats(String s) {
+    var up = 0, down = 0;
+    for (final part in s.split(';')) {
+      final f = part.split(',');
+      if (f.length != 3 || f[0] != 'proxy') continue;
+      final v = int.tryParse(f[2]) ?? 0;
+      if (f[1] == 'uplink') up += v;
+      if (f[1] == 'downlink') down += v;
+    }
+    return (up: up, down: down);
+  }
+
+  @override
+  Future<List<String>> fetchLogs() async {
+    if (!Plat.android) return const ['Журнал на iPhone пока недоступен'];
+    try {
+      final list = await _ch.invokeListMethod<String>('logs') ?? const [];
+      return list;
+    } catch (e) {
+      return ['Не удалось прочитать журнал: $e'];
+    }
+  }
+
+  /// Android: приложения с ярлыком на рабочем столе.
+  static Future<List<({String pkg, String label, Uint8List? icon})>> installedApps() async {
+    final raw = await _ch.invokeListMethod<Map<dynamic, dynamic>>('apps') ?? const [];
+    return raw
+        .map((m) => (
+              pkg: m['pkg'] as String,
+              label: (m['label'] as String?) ?? (m['pkg'] as String),
+              icon: m['icon'] as Uint8List?,
+            ))
+        .toList()
+      ..sort((a, b) => a.label.toLowerCase().compareTo(b.label.toLowerCase()));
   }
 
   @override
@@ -106,6 +171,37 @@ class DesktopVpnBackend implements VpnBackend {
 
   @override
   List<String> get logs => List.unmodifiable(_logs);
+
+  @override
+  Future<List<String>> fetchLogs() async => logs;
+
+  @override
+  Future<({int up, int down})?> trafficDelta() async {
+    if (_proc == null) return null;
+    try {
+      final r = await Process.run(xrayPath(), [
+        'api',
+        'statsquery',
+        '--server=127.0.0.1:${XrayConfigBuilder.apiPort}',
+        '-pattern',
+        'outbound>>>proxy>>>',
+        '-reset',
+      ]).timeout(const Duration(seconds: 3));
+      if (r.exitCode != 0) return null;
+      final j = jsonDecode(r.stdout.toString()) as Map<String, dynamic>;
+      var up = 0, down = 0;
+      for (final e in (j['stat'] as List? ?? const [])) {
+        final m = e as Map<String, dynamic>;
+        final name = m['name'] as String? ?? '';
+        final v = int.tryParse('${m['value'] ?? 0}') ?? 0;
+        if (name.endsWith('uplink')) up += v;
+        if (name.endsWith('downlink')) down += v;
+      }
+      return (up: up, down: down);
+    } catch (_) {
+      return null;
+    }
+  }
 
   void _log(String line) {
     final t = DateTime.now();
@@ -172,7 +268,12 @@ class DesktopVpnBackend implements VpnBackend {
 
     final inbound = tun ? InboundMode.tunDesktop : InboundMode.proxy;
     final config = XrayConfigBuilder.build(server,
-        routing: routing, inbound: inbound, settings: settings, windows: Platform.isWindows);
+        routing: routing,
+        inbound: inbound,
+        settings: settings,
+        windows: Platform.isWindows,
+        stats: true,
+        statsApi: true);
     final dir = await getApplicationSupportDirectory();
     final cfgFile = File('${dir.path}${Platform.pathSeparator}config.json');
     await cfgFile.writeAsString(jsonEncode(config));
@@ -276,12 +377,24 @@ class DemoVpnBackend implements VpnBackend {
     _ctrl.add(const VpnStatus(VpnState.connecting));
     _logs.add('демо: подключение к ${server.name}');
     await Future<void>.delayed(const Duration(milliseconds: 1200));
+    _on = true;
     _ctrl.add(const VpnStatus(VpnState.connected));
   }
 
   @override
   Future<void> stop() async {
     _logs.add('демо: отключено');
+    _on = false;
     _ctrl.add(const VpnStatus(VpnState.disconnected));
   }
+
+  bool _on = false;
+  final _rnd = Random();
+
+  @override
+  Future<List<String>> fetchLogs() async => logs;
+
+  @override
+  Future<({int up, int down})?> trafficDelta() async =>
+      _on ? (up: 2000 + _rnd.nextInt(40000), down: 20000 + _rnd.nextInt(900000)) : null;
 }

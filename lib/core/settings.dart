@@ -6,6 +6,9 @@ enum ServerSort { none, ping, name }
 
 enum IpType { auto, ipv4, ipv6 }
 
+/// Android: какие приложения идут через VPN.
+enum SplitMode { all, only, except }
+
 /// Все настройки приложения. Хранятся одной JSON-строкой.
 class AppSettings {
   // ---- Соединение ----
@@ -13,6 +16,9 @@ class AppSettings {
   bool launchAtStartup = false;
   bool allowLan = true;
   bool leakProtection = false; // Windows TUN: фильтры WFP против утечек DNS
+  bool startMinimized = false; // Windows: при автозапуске — сразу в трей
+  SplitMode splitMode = SplitMode.all;
+  List<String> splitApps = [];
 
   // ---- Туннель ----
   bool fragment = false;
@@ -73,6 +79,9 @@ class AppSettings {
         'launchAtStartup': launchAtStartup,
         'allowLan': allowLan,
         'leakProtection': leakProtection,
+        'startMinimized': startMinimized,
+        'splitMode': splitMode.name,
+        'splitApps': splitApps,
         'fragment': fragment,
         'fragmentPackets': fragmentPackets,
         'fragmentLength': fragmentLength,
@@ -116,6 +125,9 @@ class AppSettings {
     s.launchAtStartup = b('launchAtStartup', s.launchAtStartup);
     s.allowLan = b('allowLan', s.allowLan);
     s.leakProtection = b('leakProtection', s.leakProtection);
+    s.startMinimized = b('startMinimized', s.startMinimized);
+    s.splitMode = _enum(SplitMode.values, j['splitMode'], s.splitMode);
+    if (j['splitApps'] is List) s.splitApps = (j['splitApps'] as List).whereType<String>().toList();
     s.fragment = b('fragment', s.fragment);
     s.fragmentPackets = t('fragmentPackets', s.fragmentPackets);
     s.fragmentLength = t('fragmentLength', s.fragmentLength);

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../core/vpn_backend.dart';
 import '../state/app_state.dart';
@@ -314,4 +315,57 @@ String statusText(AppState s) {
     case VpnState.disconnected:
       return 'VPN выключен';
   }
+}
+
+/// 1536 → «1,5 КБ».
+String fmtBytes(int b) {
+  if (b < 1024) return '$b Б';
+  const units = ['КБ', 'МБ', 'ГБ', 'ТБ'];
+  var v = b / 1024;
+  var i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  final s = v >= 100 ? v.toStringAsFixed(0) : v.toStringAsFixed(1);
+  return '${s.replaceAll('.', ',')} ${units[i]}';
+}
+
+String fmtSpeed(int bytesPerSec) => '${fmtBytes(bytesPerSec)}/с';
+
+Future<void> openUrl(String url) async {
+  try {
+    await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+  } catch (_) {}
+}
+
+/// Плашка-уведомление (обновление, срок подписки).
+class NoticeBar extends StatelessWidget {
+  const NoticeBar({super.key, required this.text, this.action, this.onAction, this.warn = false});
+  final String text;
+  final String? action;
+  final VoidCallback? onAction;
+  final bool warn;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+        decoration: BoxDecoration(
+          color: warn ? const Color(0xFFF6E3DA) : K.chip,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Row(children: [
+          Expanded(
+            child: Text(text,
+                style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: warn ? const Color(0xFF7A3A1E) : K.text2)),
+          ),
+          if (action != null)
+            TextButton(
+              onPressed: onAction,
+              style: TextButton.styleFrom(foregroundColor: K.ink),
+              child: Text(action!, style: const TextStyle(fontWeight: FontWeight.w700)),
+            ),
+        ]),
+      );
 }

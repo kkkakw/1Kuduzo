@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kuduzo/core/link_parser.dart';
 import 'package:kuduzo/core/settings.dart';
+import 'package:kuduzo/core/vpn_backend.dart';
 import 'package:kuduzo/core/xray_config.dart';
 
 // Тестовые ключи: данные выдуманы, совпадает только формат.
@@ -98,7 +99,8 @@ void main() {
     for (final l in links) {
       final s = LinkParser.parse(l)!;
       for (final inb in InboundMode.values) {
-        final cfg = XrayConfigBuilder.build(s, routing: RoutingMode.smart, inbound: inb, settings: heavy);
+        final cfg = XrayConfigBuilder.build(s,
+          routing: RoutingMode.smart, inbound: inb, settings: heavy, stats: true, statsApi: inb != InboundMode.tunMobile, lite: inb == InboundMode.tunMobile);
         File('${dir.path}/heavy_${s.protocol}_${inb.name}_${n++}.json')
             .writeAsStringSync(const JsonEncoder.withIndent('  ').convert(cfg));
       }
@@ -110,6 +112,22 @@ void main() {
       final cfg = XrayConfigBuilder.forDelayTest(all, 30000, st);
       File('${dir.path}/delay_${n++}.json').writeAsStringSync(jsonEncode(cfg));
     }
+  });
+
+  test('ссылки kuduzo://', () {
+    const sub = 'https://vpnkuduzo.ru/sub/abc?device_key=XYZ';
+    expect(LinkParser.fromAppLink('kuduzo://import/$sub'), sub);
+    expect(LinkParser.fromAppLink('kuduzo://add/$sub'), sub);
+    expect(LinkParser.fromAppLink('kuduzo://add?url=${Uri.encodeComponent(sub)}'), sub);
+    expect(LinkParser.fromAppLink('kuduzo://${base64.encode(utf8.encode(sub))}'), sub);
+    expect(LinkParser.fromAppLink('kuduzo://import/$vlessReality')!.startsWith('vless://'), true);
+    expect(LinkParser.fromAppLink('kuduzo://'), null);
+  });
+
+  test('статистика libv2ray', () {
+    final r = MobileVpnBackend.parseLibStats('proxy,uplink,100;proxy,downlink,2000;direct,downlink,5;');
+    expect(r.up, 100);
+    expect(r.down, 2000);
   });
 
   test('настройки сохраняются и читаются', () {

@@ -8,6 +8,7 @@ import '../core/vpn_backend.dart';
 import '../state/app_state.dart';
 import '../theme.dart';
 import '../version.dart';
+import 'apps_screen.dart';
 import 'widgets.dart';
 
 /// Раздел «Настройки» (как в INCY, в стиле Kuduzo).
@@ -176,6 +177,12 @@ class SettingsPanel extends StatelessWidget {
               value: st.launchAtStartup,
               onChanged: (v) => set((x) => x.launchAtStartup = v),
             ),
+          if (win && st.launchAtStartup)
+            _SwitchRow(
+              title: 'Запускать свёрнутым в трей',
+              value: st.startMinimized,
+              onChanged: (v) => set((x) => x.startMinimized = v),
+            ),
           _SwitchRow(
             title: 'Разрешить локальную сеть',
             subtitle: 'Принтеры, роутер и устройства дома — напрямую, мимо VPN',
@@ -190,6 +197,27 @@ class SettingsPanel extends StatelessWidget {
               onChanged: (v) => set((x) => x.leakProtection = v, reconnect: true),
             ),
         ]),
+
+        // ---------------- Приложения (Android) ----------------
+        if (Plat.android)
+          _Section(title: 'Приложения', icon: Icons.apps_rounded, children: [
+            for (final m in SplitMode.values)
+              _RadioRow(
+                title: switch (m) {
+                  SplitMode.all => 'Все приложения через VPN',
+                  SplitMode.only => 'Только выбранные',
+                  SplitMode.except => 'Все, кроме выбранных',
+                },
+                selected: st.splitMode == m,
+                onTap: () => set((x) => x.splitMode = m, reconnect: true),
+              ),
+            if (st.splitMode != SplitMode.all)
+              _NavRow(
+                title: 'Выбрать приложения (${st.splitApps.length})',
+                icon: Icons.checklist_rounded,
+                onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AppsScreen())),
+              ),
+          ]),
 
         // ---------------- Туннель ----------------
         _Section(title: 'Туннель', icon: Icons.shield_outlined, children: [
@@ -317,7 +345,7 @@ class SettingsPanel extends StatelessWidget {
               onChanged: (v) => set((x) => x.logLevel = v, reconnect: true),
             ),
           ),
-          if (desktop && onOpenLogs != null)
+          if (onOpenLogs != null && !Plat.web)
             _NavRow(title: 'Журнал ядра', icon: Icons.receipt_long_rounded, onTap: onOpenLogs!),
           _NavRow(
             title: 'Скопировать ID устройства',
@@ -331,7 +359,22 @@ class SettingsPanel extends StatelessWidget {
 
         // ---------------- О программе ----------------
         _Section(title: 'О программе', icon: Icons.info_outline_rounded, children: [
-          const _InfoRow(title: 'Kuduzo', value: 'версия $appVersion'),
+          const _InfoRow(title: 'Kuduzo VPN', value: 'версия $appVersion'),
+          if (s.updateVersion != null)
+            _NavRow(
+              title: 'Скачать версию ${s.updateVersion}',
+              icon: Icons.system_update_rounded,
+              onTap: () => openUrl(releasesPage),
+            )
+          else if (!Plat.web)
+            _NavRow(
+              title: 'Проверить обновления',
+              icon: Icons.refresh_rounded,
+              onTap: () async {
+                await s.checkUpdates();
+                if (context.mounted) toast(context, s.updateVersion == null ? 'У вас последняя версия' : 'Доступна версия ${s.updateVersion}');
+              },
+            ),
           if (desktop)
             FutureBuilder<String>(
               future: _coreVersion ??= DesktopVpnBackend.coreVersion(),
@@ -661,23 +704,26 @@ class LogsPanel extends StatefulWidget {
 }
 
 class _LogsPanelState extends State<LogsPanel> {
+  List<String> lines = const [];
+
   @override
   void initState() {
     super.initState();
-    _tick();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _tick());
   }
 
   Future<void> _tick() async {
     while (mounted) {
-      await Future<void>.delayed(const Duration(seconds: 1));
-      if (mounted) setState(() {});
+      final AppState s = AppScope.of(context);
+      final l = await s.fetchLogs();
+      if (!mounted) return;
+      setState(() => lines = l);
+      await Future<void>.delayed(const Duration(milliseconds: 1500));
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final AppState s = AppScope.of(context);
-    final lines = s.logs;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Padding(
         padding: const EdgeInsets.only(bottom: 16, top: 4),

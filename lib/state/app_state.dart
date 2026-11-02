@@ -4,7 +4,10 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../version.dart';
 
 import '../core/link_parser.dart';
 import '../core/ping.dart';
@@ -51,6 +54,90 @@ class AppState extends ChangeNotifier {
 
   bool get isOn => state == VpnState.connected || state == VpnState.connecting;
   bool get isDesktop => Plat.desktop;
+
+  // ---- Скорость и трафик ----
+  Timer? _trafficTimer;
+  int speedUp = 0; // байт/с
+  int speedDown = 0;
+  int totalUp = 0;
+  int totalDown = 0;
+  bool hasTraffic = false;
+
+  // ---- Обновления программы ----
+  String? updateVersion;
+
+  // ---- Сообщения для всплывающих подсказок ----
+  final _messages = StreamController<String>.broadcast();
+  Stream<String> get messages => _messages.stream;
+  void say(String text) => _messages.add(text);
+
+  /// Подписка, срок которой скоро закончится (или уже закончился).
+  ({Subscription sub, int days})? get expiring {
+    for (final s in subscriptions) {
+      final e = s.expire;
+      if (e == null) continue;
+      final days = e.difference(DateTime.now()).inHours / 24;
+      if (days < 3) return (sub: s, days: days.floor());
+    }
+    return null;
+  }
+
+  Future<List<String>> fetchLogs() => _backend.fetchLogs();
+
+  Future<void> checkUpdates() async {
+    if (Plat.web) return;
+    try {
+      final r = await http.get(Uri.parse(versionUrl)).timeout(const Duration(seconds: 15));
+      if (r.statusCode != 200) return;
+      final j = jsonDecode(r.body) as Map<String, dynamic>;
+      final build = (j['build'] as num?)?.toInt() ?? 0;
+      if (build > appBuild) {
+        updateVersion = (j['version'] ?? '').toString();
+        notifyListeners();
+      }
+    } catch (_) {}
+  }
+
+  /// Ссылка kuduzo://… с сайта: добавить подписку или ключ.
+  Future<void> handleLink(String link) async {
+    final payload = LinkParser.fromAppLink(link);
+    if (payload == null) {
+      say('Не удалось разобрать ссылку');
+      return;
+    }
+    try {
+      say(await addFromText(payload));
+    } on SubscriptionException catch (e) {
+      say(e.message);
+    } catch (e) {
+      say('Ошибка: $e');
+    }
+  }
+
+  void _startTraffic() {
+    _trafficTimer?.cancel();
+    speedUp = speedDown = totalUp = totalDown = 0;
+    hasTraffic = false;
+    final period = Plat.desktop ? 2 : 1;
+    _trafficTimer = Timer.periodic(Duration(seconds: period), (_) async {
+      if (state != VpnState.connected) return;
+      final d = await _backend.trafficDelta();
+      if (d == null) return;
+      hasTraffic = true;
+      totalUp += d.up;
+      totalDown += d.down;
+      speedUp = d.up ~/ period;
+      speedDown = d.down ~/ period;
+      notifyListeners();
+    });
+  }
+
+  void _stopTraffic() {
+    _trafficTimer?.cancel();
+    _trafficTimer = null;
+    hasTraffic = false;
+    speedUp = speedDown = 0;
+  }
 
   Future<void> load() async {
     try {
@@ -106,6 +193,7 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> _onLaunch() async {
+    unawaited(checkUpdates());
     if (settings.updateOnLaunch && subscriptions.isNotEmpty && !Plat.web) {
       await refreshAll(silent: true, ping: false);
     }
@@ -123,10 +211,13 @@ class AppState extends ChangeNotifier {
   /// Меняет настройки, сохраняет и применяет. Переподключается, если это влияет на туннель.
   Future<void> updateSettings(void Function(AppSettings s) change, {bool reconnect = false}) async {
     final oldStartup = settings.launchAtStartup;
+    final oldMin = settings.startMinimized;
     change(settings);
     await _prefs.setString('settings', settings.encode());
     _scheduleUpdates();
-    if (oldStartup != settings.launchAtStartup) await _applyStartup(settings.launchAtStartup);
+    if (oldStartup != settings.launchAtStartup || oldMin != settings.startMinimized) {
+      await _applyStartup(settings.launchAtStartup);
+    }
     notifyListeners();
     if (reconnect && isOn) await connect();
   }
@@ -136,7 +227,8 @@ class AppState extends ChangeNotifier {
     const key = r'HKCU\Software\Microsoft\Windows\CurrentVersion\Run';
     try {
       if (on) {
-        await Process.run('reg', ['add', key, '/v', 'Kuduzo', '/t', 'REG_SZ', '/d', '"${Platform.resolvedExecutable}"', '/f']);
+        final cmd = '"${Platform.resolvedExecutable}"${settings.startMinimized ? ' --minimized' : ''}';
+        await Process.run('reg', ['add', key, '/v', 'Kuduzo', '/t', 'REG_SZ', '/d', cmd, '/f']);
       } else {
         await Process.run('reg', ['delete', key, '/v', 'Kuduzo', '/f']);
       }
@@ -344,16 +436,20 @@ class AppState extends ChangeNotifier {
     await _backend.stop();
     state = VpnState.disconnected;
     connectedAt = null;
+    _stopTraffic();
     notifyListeners();
   }
 
   void _onStatus(VpnStatus st) {
+    final was = state;
     state = st.state;
     message = st.message;
     if (st.state == VpnState.connected) {
       connectedAt ??= DateTime.now();
+      if (was != VpnState.connected) _startTraffic();
     } else if (st.state != VpnState.connecting) {
       connectedAt = null;
+      _stopTraffic();
     }
     notifyListeners();
   }
@@ -382,6 +478,7 @@ class AppState extends ChangeNotifier {
 
   @override
   void dispose() {
+    _trafficTimer?.cancel();
     _updateTimer?.cancel();
     _statusSub?.cancel();
     super.dispose();

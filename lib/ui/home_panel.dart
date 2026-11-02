@@ -6,6 +6,7 @@ import '../core/vpn_backend.dart';
 import '../core/xray_config.dart';
 import '../state/app_state.dart';
 import '../theme.dart';
+import '../version.dart';
 import 'widgets.dart';
 
 /// Главный экран: заголовок, тумблер, статус, текущий сервер, режимы.
@@ -27,9 +28,25 @@ class HomePanel extends StatelessWidget {
             ? K.bad
             : const Color(0xFFA8A39D);
 
+    final exp = s.expiring;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (s.updateVersion != null)
+          NoticeBar(
+            text: 'Доступна новая версия ${s.updateVersion}',
+            action: 'Скачать',
+            onAction: () => openUrl(releasesPage),
+          ),
+        if (exp != null)
+          NoticeBar(
+            warn: true,
+            text: exp.days < 0
+                ? 'Подписка «${exp.sub.displayTitle}» закончилась'
+                : exp.days == 0
+                    ? 'Подписка «${exp.sub.displayTitle}» заканчивается сегодня'
+                    : 'Подписка «${exp.sub.displayTitle}» закончится через ${exp.days} дн.',
+          ),
         SizedBox(height: wide ? 12 : 28),
         _Headline(on: connected, size: wide ? 40 : 34),
         SizedBox(height: wide ? 40 : 34),
@@ -74,6 +91,19 @@ class HomePanel extends StatelessWidget {
               : Text(s.servers.isEmpty ? 'Добавьте подписку, чтобы начать' : 'Нажми на тумблер',
                   style: const TextStyle(fontSize: 14, color: K.muted)),
         ),
+        if (connected && s.hasTraffic) ...[
+          const SizedBox(height: 10),
+          Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            _Speed(icon: Icons.arrow_downward_rounded, text: fmtSpeed(s.speedDown)),
+            const SizedBox(width: 18),
+            _Speed(icon: Icons.arrow_upward_rounded, text: fmtSpeed(s.speedUp)),
+          ]),
+          const SizedBox(height: 4),
+          Center(
+            child: Text('Всего: ${fmtBytes(s.totalDown + s.totalUp)}',
+                style: const TextStyle(fontSize: 12.5, color: K.muted)),
+          ),
+        ],
         const SizedBox(height: 28),
         if (!wide)
           KCard(
@@ -131,6 +161,21 @@ class HomePanel extends StatelessWidget {
       ],
     );
   }
+}
+
+class _Speed extends StatelessWidget {
+  const _Speed({required this.icon, required this.text});
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 16, color: K.accent),
+        const SizedBox(width: 4),
+        Text(text,
+            style: const TextStyle(
+                fontSize: 14, fontWeight: FontWeight.w600, color: K.text2, fontFeatures: [FontFeature.tabularFigures()])),
+      ]);
 }
 
 class _Headline extends StatelessWidget {

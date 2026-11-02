@@ -1,7 +1,7 @@
 name: kuduzo
 description: Kuduzo — VPN-клиент на базе Xray-core для iOS, Android, macOS и Windows.
 publish_to: "none"
-version: 0.2.0+2
+version: 0.3.0+3
 
 environment:
   sdk: ^3.5.0
@@ -14,6 +14,11 @@ dependencies:
   path_provider: ^2.1.4
   kuduzo_vpn_ios:
     path: packages/kuduzo_vpn_ios
+  url_launcher: ^6.3.1
+  app_links: ">=6.3.0 <8.0.0"
+  mobile_scanner: ">=6.0.0 <8.0.0"
+  tray_manager: ">=0.2.3 <1.0.0"
+  window_manager: ">=0.4.3 <1.0.0"
 
 dev_dependencies:
   flutter_test:
@@ -23,6 +28,9 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/icon/tray.ico
+    - assets/icon/tray_mac.png
   fonts:
     - family: Inter
       fonts:

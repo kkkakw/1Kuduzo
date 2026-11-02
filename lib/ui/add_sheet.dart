@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../core/platform.dart';
 import '../core/subscription.dart';
 import '../theme.dart';
+import 'qr_screen.dart';
 import 'widgets.dart';
 
 /// Окно добавления: ссылка на подписку или ключи.
@@ -82,6 +84,29 @@ Future<void> showAddSheet(BuildContext context) async {
                   ),
                 ),
               ),
+              if (Plat.mobile) ...[
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: K.ink,
+                    minimumSize: const Size.fromHeight(48),
+                    side: const BorderSide(color: K.line),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                  ),
+                  onPressed: busy
+                      ? null
+                      : () async {
+                          final v = await Navigator.of(ctx).push<String>(
+                              MaterialPageRoute<String>(builder: (_) => const QrScreen()));
+                          if (v != null && v.isNotEmpty) {
+                            ctrl.text = v;
+                            await submit();
+                          }
+                        },
+                  icon: const Icon(Icons.qr_code_scanner_rounded),
+                  label: const Text('Сканировать QR-код'),
+                ),
+              ],
               const SizedBox(height: 18),
               busy
                   ? const SizedBox(height: 60, child: Center(child: CircularProgressIndicator(color: K.ink)))

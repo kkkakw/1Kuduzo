@@ -43,6 +43,16 @@ class KuduzoVpnService : VpnService() {
             lastStatus = status
             main.post { events?.success(status) }
         }
+
+        @Volatile
+        private var current: KuduzoVpnService? = null
+
+        /** Трафик с прошлого запроса: «proxy,uplink,123;proxy,downlink,456;». */
+        fun queryStats(): String = try {
+            current?.core?.queryAllOutboundTrafficStats() ?: ""
+        } catch (e: Throwable) {
+            ""
+        }
     }
 
     private var tun: ParcelFileDescriptor? = null
@@ -58,14 +68,17 @@ class KuduzoVpnService : VpnService() {
             ACTION_START -> {
                 val config = intent.getStringExtra("config") ?: return START_NOT_STICKY
                 val name = intent.getStringExtra("name") ?: "Kuduzo"
+                val splitMode = intent.getStringExtra("splitMode") ?: "all"
+                val splitApps = intent.getStringArrayListExtra("splitApps") ?: arrayListOf()
                 showNotification(name)
-                Thread { startVpn(config) }.start()
+                current = this
+                Thread { startVpn(config, splitMode, splitApps) }.start()
             }
         }
         return START_NOT_STICKY
     }
 
-    private fun startVpn(config: String) {
+    private fun startVpn(config: String, splitMode: String, splitApps: List<String>) {
         synchronized(lock) {
             stopCore()
             emit("connecting")
@@ -83,7 +96,20 @@ class KuduzoVpnService : VpnService() {
                 } catch (e: Exception) {
                     Log.w(TAG, "IPv6 недоступен: ${e.message}")
                 }
-                builder.addDisallowedApplication(packageName)
+                // Раздельное туннелирование. Своё приложение всегда мимо VPN — иначе ядро зациклится.
+                val chosen = splitApps.filter { it != packageName }
+                if (splitMode == "only" && chosen.isNotEmpty()) {
+                    for (p in chosen) {
+                        try { builder.addAllowedApplication(p) } catch (_: Exception) { }
+                    }
+                } else {
+                    builder.addDisallowedApplication(packageName)
+                    if (splitMode == "except") {
+                        for (p in chosen) {
+                            try { builder.addDisallowedApplication(p) } catch (_: Exception) { }
+                        }
+                    }
+                }
                 if (Build.VERSION.SDK_INT >= 29) builder.setMetered(false)
 
                 val pfd = builder.establish() ?: throw IllegalStateException("Система не дала создать VPN")
@@ -148,6 +174,7 @@ class KuduzoVpnService : VpnService() {
 
     override fun onDestroy() {
         synchronized(lock) { stopCore() }
+        if (current === this) current = null
         if (lastStatus != "disconnected" && !lastStatus.startsWith("error")) emit("disconnected")
         super.onDestroy()
     }

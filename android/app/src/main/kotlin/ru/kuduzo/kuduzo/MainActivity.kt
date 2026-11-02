@@ -4,8 +4,13 @@ import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.net.VpnService
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import java.io.ByteArrayOutputStream
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
@@ -45,10 +50,14 @@ class MainActivity : FlutterActivity() {
                 "start" -> {
                     val config = call.argument<String>("config") ?: ""
                     val name = call.argument<String>("name") ?: "Kuduzo"
+                    val splitMode = call.argument<String>("splitMode") ?: "all"
+                    val splitApps = ArrayList(call.argument<List<String>>("splitApps") ?: emptyList())
                     val i = Intent(this, KuduzoVpnService::class.java)
                         .setAction(KuduzoVpnService.ACTION_START)
                         .putExtra("config", config)
                         .putExtra("name", name)
+                        .putExtra("splitMode", splitMode)
+                        .putStringArrayListExtra("splitApps", splitApps)
                     if (Build.VERSION.SDK_INT >= 26) startForegroundService(i) else startService(i)
                     result.success(null)
                 }
@@ -57,9 +66,55 @@ class MainActivity : FlutterActivity() {
                     startService(i)
                     result.success(null)
                 }
+                "stats" -> result.success(KuduzoVpnService.queryStats())
+                "logs" -> Thread {
+                    val lines = readLogs()
+                    Handler(Looper.getMainLooper()).post { result.success(lines) }
+                }.start()
+                "apps" -> Thread {
+                    val list = try { launcherApps() } catch (e: Exception) { emptyList() }
+                    Handler(Looper.getMainLooper()).post { result.success(list) }
+                }.start()
                 else -> result.notImplemented()
             }
         }
+    }
+
+    /** Последние строки журнала своего процесса (ядро Xray пишет в logcat). */
+    private fun readLogs(): List<String> = try {
+        val p = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "300", "--pid=" + android.os.Process.myPid()))
+        p.inputStream.bufferedReader().readLines()
+            .filter { it.contains("GoLog") || it.contains("KuduzoVpn") || it.contains("libv2ray") || it.contains("Xray") }
+            .ifEmpty { listOf("Журнал пуст — включите VPN и откройте снова") }
+    } catch (e: Exception) {
+        listOf("Не удалось прочитать журнал: ${e.message}")
+    }
+
+    /** Приложения с ярлыком: пакет, название, иконка 64×64 PNG. */
+    private fun launcherApps(): List<Map<String, Any?>> {
+        val pm = packageManager
+        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        @Suppress("DEPRECATION")
+        val acts = pm.queryIntentActivities(intent, 0)
+        val seen = HashSet<String>()
+        val out = ArrayList<Map<String, Any?>>()
+        for (ri in acts) {
+            val pkg = ri.activityInfo.packageName
+            if (pkg == packageName || !seen.add(pkg)) continue
+            val label = ri.loadLabel(pm).toString()
+            val icon: ByteArray? = try {
+                val d = ri.loadIcon(pm)
+                val bmp = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888)
+                val c = Canvas(bmp)
+                d.setBounds(0, 0, 64, 64)
+                d.draw(c)
+                val bos = ByteArrayOutputStream()
+                bmp.compress(Bitmap.CompressFormat.PNG, 100, bos)
+                bos.toByteArray()
+            } catch (e: Exception) { null }
+            out.add(mapOf("pkg" to pkg, "label" to label, "icon" to icon))
+        }
+        return out
     }
 
     private fun askNotificationPermission() {

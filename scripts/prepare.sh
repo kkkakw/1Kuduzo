@@ -49,11 +49,27 @@ case "$PLATFORM" in
     if ! grep -q "libv2ray.aar" "$GRADLE"; then
       cat >> "$GRADLE" <<'EOF'
 
-// --- Kuduzo: ядро Xray и правила R8 ---
+// --- Kuduzo: ядро Xray, правила R8 и постоянная подпись ---
+// Пароль ключа — секрет репозитория ANDROID_KEYSTORE_PASSWORD. Без него APK подписывается отладочным ключом.
+val kuduzoStorePassword: String? = System.getenv("ANDROID_KEYSTORE_PASSWORD")
 android {
+    defaultConfig {
+        minSdk = 24
+    }
+    signingConfigs {
+        create("kuduzo") {
+            storeFile = rootProject.file("kuduzo-release.jks")
+            storePassword = kuduzoStorePassword
+            keyAlias = "kuduzo"
+            keyPassword = kuduzoStorePassword
+        }
+    }
     buildTypes {
         getByName("release") {
             proguardFiles("proguard-rules.pro")
+            if (!kuduzoStorePassword.isNullOrEmpty()) {
+                signingConfig = signingConfigs.getByName("kuduzo")
+            }
         }
     }
 }

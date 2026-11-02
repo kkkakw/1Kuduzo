@@ -42,7 +42,16 @@ class _ShellState extends State<Shell> {
       case 1:
         body = const ServersPanel();
       default:
-        body = const SettingsPanel();
+        body = SettingsPanel(
+          onOpenLogs: () => Navigator.of(context).push(MaterialPageRoute<void>(
+            builder: (_) => Scaffold(
+              appBar: AppBar(backgroundColor: K.bg, surfaceTintColor: Colors.transparent),
+              body: const SafeArea(
+                child: Padding(padding: EdgeInsets.fromLTRB(16, 0, 16, 16), child: LogsPanel()),
+              ),
+            ),
+          )),
+        );
     }
     return Scaffold(
       body: SafeArea(

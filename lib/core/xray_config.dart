@@ -25,6 +25,7 @@ enum InboundMode {
 class XrayConfigBuilder {
   static const socksPort = 10808;
   static const httpPort = 10809;
+  static const apiPort = 10813;
 
   static Map<String, dynamic> build(
     ServerConfig s, {
@@ -33,6 +34,8 @@ class XrayConfigBuilder {
     AppSettings? settings,
     bool windows = false,
     bool lite = false, // iOS: без geosite.dat — расширению VPN доступно ~50 МБ памяти
+    bool stats = false, // счётчики трафика (скорость на главном экране)
+    bool statsApi = false, // компьютер: gRPC API для `xray api statsquery`
   }) {
     final st = settings ?? AppSettings();
     final sniffing = {
@@ -118,7 +121,17 @@ class XrayConfigBuilder {
     return {
       'log': {'loglevel': st.logLevel},
       'dns': _dns(st),
-      'policy': _policy(st),
+      'policy': {
+        ..._policy(st),
+        if (stats) 'system': {'statsOutboundUplink': true, 'statsOutboundDownlink': true},
+      },
+      if (stats) 'stats': <String, dynamic>{},
+      if (stats && statsApi)
+        'api': {
+          'tag': 'api',
+          'listen': '127.0.0.1:$apiPort',
+          'services': ['StatsService'],
+        },
       'inbounds': inbounds,
       'outbounds': [
         outbound(s, settings: st),

@@ -51,6 +51,28 @@ class LinkParser {
     return out;
   }
 
+  /// Что импортировать из ссылки приложения:
+  /// kuduzo://import/https://… · kuduzo://add/https://… · kuduzo://add?url=… · kuduzo://<base64> · kuduzo://vless://…
+  static String? fromAppLink(String link) {
+    final t = link.trim();
+    final i = t.indexOf('://');
+    if (i < 0) return null;
+    var rest = t.substring(i + 3);
+    final q = Uri.tryParse(t)?.queryParameters['url'];
+    if (q != null && q.isNotEmpty) return q;
+    for (final p in ['import/', 'add/', 'sub/', 'subscription/', 'install-config/']) {
+      if (rest.startsWith(p)) {
+        rest = rest.substring(p.length);
+        break;
+      }
+    }
+    if (rest.startsWith('http%3A') || rest.startsWith('https%3A')) rest = _dec(rest);
+    if (rest.startsWith('http://') || rest.startsWith('https://') || looksLikeLink(rest)) return rest;
+    final b = tryBase64(rest);
+    if (b != null && (b.startsWith('http') || looksLikeLink(b.trim()))) return b.trim();
+    return null;
+  }
+
   // ---------- общие помощники ----------
 
   static String _dec(String s) {
