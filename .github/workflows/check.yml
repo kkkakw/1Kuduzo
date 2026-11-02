@@ -1,0 +1,70 @@
+name: Проверка (dev)
+
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+jobs:
+  dart:
+    name: Dart — анализ и тесты
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: Анализ
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+      - name: Тесты
+        run: flutter test
+
+  kotlin:
+    name: Android — компиляция
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: bash scripts/prepare.sh android
+      - run: flutter build apk --debug --target-platform android-arm64
+
+  swift:
+    name: iOS — компиляция
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache-dependency-path: ios_core/go.sum
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Ядро Xray для iOS
+        working-directory: ios_core
+        run: |
+          go mod tidy
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          gomobile init
+          gomobile bind -target=ios -iosversion=15.0 -trimpath -ldflags='-s -w -buildid= -checklinkname=0' -o ../build/ios-core/Kuduzocore.xcframework .
+      - run: bash scripts/prepare.sh ios
+      - name: Network Extension
+        run: |
+          VER=$(grep '^version:' pubspec.yaml | sed 's/version: *//')
+          ruby scripts/ios_add_extension.rb "${VER%%+*}" "${VER##*+}"
+      - name: Сборка
+        run: |
+          flutter build ios --config-only --release --no-codesign || true
+          if [ -f ios/Podfile ]; then sed -i '' "s/^# platform :ios.*/platform :ios, '15.0'/" ios/Podfile; fi
+          flutter build ios --release --no-codesign
