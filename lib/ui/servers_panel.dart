@@ -19,7 +19,7 @@ class ServersPanel extends StatelessWidget {
     var i = 0;
 
     return ListView(
-      padding: const EdgeInsets.only(bottom: 32),
+      padding: EdgeInsets.only(bottom: 32 + MediaQuery.paddingOf(context).bottom),
       children: [
         if (showTitle)
           Padding(
@@ -179,6 +179,7 @@ class _ServerList extends StatelessWidget {
           _Row(
             key: ValueKey(srv.id),
             badge: srv.badge,
+            country: s.countryOf(srv),
             title: srv.title,
             subtitle: srv.protocolLabel,
             ping: s.pings[srv.id],
@@ -201,11 +202,13 @@ class _Row extends StatelessWidget {
     required this.ping,
     required this.selected,
     required this.onTap,
+    this.country,
     this.showPing = false,
     this.onLongPress,
   });
 
   final String badge;
+  final String? country;
   final String title;
   final String subtitle;
   final int? ping;
@@ -234,7 +237,7 @@ class _Row extends StatelessWidget {
           borderRadius: BorderRadius.circular(18),
         ),
         child: Row(children: [
-          Badge2(text: badge, dark: selected, size: 38),
+          FlagBadge(code: country, text: badge, dark: selected, size: 38),
           const SizedBox(width: 12),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

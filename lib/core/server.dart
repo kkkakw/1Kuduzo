@@ -1,3 +1,4 @@
+import 'country.dart';
 /// Один сервер (ключ), разобранный из ссылки vless://, vmess://, trojan://, ss://, hysteria2://.
 class ServerConfig {
   ServerConfig({
@@ -72,6 +73,9 @@ class ServerConfig {
     }
     return h.toRadixString(16);
   }
+
+  /// Страна по названию или адресу (код «nl», «de»…); null — определит AppState по IP.
+  String? get country => Country.detect(name, host: address);
 
   /// Код страны из флага в названии (🇪🇪 → EE), иначе первые буквы.
   String get badge {

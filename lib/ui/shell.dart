@@ -1,3 +1,5 @@
+import 'dart:ui' show ImageFilter;
+
 import 'package:flutter/material.dart';
 
 import '../core/platform.dart';
@@ -48,7 +50,7 @@ class _ShellState extends State<Shell> {
 
   Widget _narrow(BuildContext context) {
     final Widget body = switch (tab) {
-      0 => ListView(children: [
+      0 => ListView(padding: EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom), children: [
           SizedBox(height: 48, child: Align(alignment: Alignment.centerLeft, child: _logo())),
           HomePanel(onOpenServers: () => setState(() => tab = 1)),
           const SizedBox(height: 24),
@@ -58,7 +60,10 @@ class _ShellState extends State<Shell> {
     };
     return Scaffold(
       backgroundColor: K.bg,
+      // Содержимое прокручивается под плавающей панелью вкладок.
+      extendBody: true,
       body: SafeArea(
+        bottom: false,
         child: Column(children: [
           if (Plat.web)
             Container(
@@ -80,21 +85,12 @@ class _ShellState extends State<Shell> {
           ),
         ]),
       ),
-      bottomNavigationBar: NavigationBar(
-        backgroundColor: K.surface,
-        indicatorColor: K.chip,
-        surfaceTintColor: Colors.transparent,
-        selectedIndex: tab,
-        animationDuration: const Duration(milliseconds: 400),
-        onDestinationSelected: (i) {
+      bottomNavigationBar: _FloatingTabs(
+        index: tab,
+        onTap: (i) {
           if (i != tab) haptic(context);
           setState(() => tab = i);
         },
-        destinations: [
-          NavigationDestination(icon: Icon(Icons.power_settings_new_rounded, color: K.ink), label: 'Главная'),
-          NavigationDestination(icon: Icon(Icons.public_rounded, color: K.ink), label: 'Серверы'),
-          NavigationDestination(icon: Icon(Icons.settings_rounded, color: K.ink), label: 'Настройки'),
-        ],
       ),
     );
   }
@@ -193,6 +189,127 @@ class _NavItem extends StatelessWidget {
                     color: selected ? K.onInk : K.navText,
                   )),
             ]),
+          ),
+        ),
+      );
+}
+
+/// Плавающая панель вкладок-капсула: размытие под ней, выбранная вкладка — «пилюля», которая перетекает.
+class _FloatingTabs extends StatelessWidget {
+  const _FloatingTabs({required this.index, required this.onTap});
+  final int index;
+  final ValueChanged<int> onTap;
+
+  static const _items = [
+    (Icons.power_settings_new_rounded, 'Главная'),
+    (Icons.public_rounded, 'Серверы'),
+    (Icons.settings_rounded, 'Настройки'),
+  ];
+  static const _h = 66.0;
+  static const _gap = 5.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final safe = MediaQuery.paddingOf(context).bottom;
+    final radius = BorderRadius.circular(_h / 2);
+    return Padding(
+      padding: EdgeInsets.fromLTRB(18, 0, 18, safe > 0 ? safe - 6 : 14),
+      child: Container(
+        height: _h,
+        decoration: BoxDecoration(
+          borderRadius: radius,
+          boxShadow: [
+            BoxShadow(color: Colors.black.withValues(alpha: K.isDark ? 0.45 : 0.10), blurRadius: 30, offset: const Offset(0, 10)),
+            BoxShadow(color: Colors.black.withValues(alpha: K.isDark ? 0.25 : 0.05), blurRadius: 4, offset: const Offset(0, 1)),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: radius,
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: K.surface.withValues(alpha: K.isDark ? 0.80 : 0.84),
+                borderRadius: radius,
+                border: Border.all(
+                  color: K.isDark ? Colors.white.withValues(alpha: 0.08) : Colors.white.withValues(alpha: 0.75),
+                ),
+              ),
+              child: LayoutBuilder(builder: (context, c) {
+                final w = (c.maxWidth - _gap * 2) / _items.length;
+                return Stack(children: [
+                  // «Пилюля» выбранной вкладки плавно переезжает с лёгким пружинящим доводом.
+                  AnimatedPositioned(
+                    duration: const Duration(milliseconds: 460),
+                    curve: Curves.easeOutBack,
+                    left: _gap + w * index,
+                    top: _gap,
+                    bottom: _gap,
+                    width: w,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: K.isDark ? Colors.white.withValues(alpha: 0.10) : K.chip,
+                        borderRadius: BorderRadius.circular(_h / 2 - _gap),
+                      ),
+                    ),
+                  ),
+                  Row(children: [
+                    const SizedBox(width: _gap),
+                    for (var i = 0; i < _items.length; i++)
+                      SizedBox(
+                        width: w,
+                        child: _TabButton(
+                          icon: _items[i].$1,
+                          label: _items[i].$2,
+                          selected: i == index,
+                          onTap: () => onTap(i),
+                        ),
+                      ),
+                    const SizedBox(width: _gap),
+                  ]),
+                ]);
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TabButton extends StatelessWidget {
+  const _TabButton({required this.icon, required this.label, required this.selected, required this.onTap});
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+        selected: selected,
+        button: true,
+        label: label,
+        child: Pressable(
+          onTap: onTap,
+          scale: 0.9,
+          child: TweenAnimationBuilder<double>(
+            tween: Tween(end: selected ? 1 : 0),
+            duration: const Duration(milliseconds: 260),
+            curve: Curves.easeOutCubic,
+            builder: (context, t, _) {
+              final color = Color.lerp(K.ink, K.accent, t)!;
+              return Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                Transform.scale(scale: 1 + 0.08 * t, child: Icon(icon, size: 25, color: color)),
+                const SizedBox(height: 3),
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.fade,
+                  softWrap: false,
+                  style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: color, letterSpacing: -0.1),
+                ),
+              ]);
+            },
           ),
         ),
       );

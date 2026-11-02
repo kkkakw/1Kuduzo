@@ -139,7 +139,8 @@ class HomePanel extends StatelessWidget {
             onTap: onOpenServers,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             child: Row(children: [
-              Badge2(
+              FlagBadge(
+                  code: server == null || (s.selectedId == AppState.autoId && !s.isOn) ? null : s.countryOf(server),
                   text: server == null ? '+' : (s.selectedId == AppState.autoId && !s.isOn ? 'A' : server.badge),
                   dark: true,
                   size: 44),

@@ -92,6 +92,7 @@ class AppSettings {
   int subTimeoutSec = 12;
   bool notifyUpdates = false;
   bool forbidDuplicates = true;
+  bool geoLookup = true; // страна сервера по IP, если её нет в названии
   bool collapseSubs = false;
 
   // ---- Пинг ----
@@ -169,6 +170,7 @@ class AppSettings {
         'subTimeoutSec': subTimeoutSec,
         'notifyUpdates': notifyUpdates,
         'forbidDuplicates': forbidDuplicates,
+        'geoLookup': geoLookup,
         'collapseSubs': collapseSubs,
         'pingView': pingView.name,
         'statsEnabled': statsEnabled,
@@ -251,6 +253,7 @@ class AppSettings {
     s.subTimeoutSec = i('subTimeoutSec', s.subTimeoutSec);
     s.notifyUpdates = b('notifyUpdates', s.notifyUpdates);
     s.forbidDuplicates = b('forbidDuplicates', s.forbidDuplicates);
+    s.geoLookup = b('geoLookup', s.geoLookup);
     s.collapseSubs = b('collapseSubs', s.collapseSubs);
     s.pingView = _enum(PingView.values, j['pingView'], s.pingView);
     s.statsEnabled = b('statsEnabled', s.statsEnabled);

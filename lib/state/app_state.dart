@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../version.dart';
 
+import '../core/country.dart';
 import '../core/link_parser.dart';
 import '../core/ping.dart';
 import '../core/platform.dart';
@@ -61,6 +62,86 @@ class AppState extends ChangeNotifier {
   }
 
   String? _shownTrafficError;
+
+  // ---------- страна сервера ----------
+
+  /// Страны, найденные по IP: адрес сервера → код («nl»).
+  final Map<String, String> _geo = {};
+  bool _ready = false;
+  final Set<String> _geoBusy = {};
+  bool _geoRunning = false;
+
+  /// Код страны сервера: из названия или адреса, иначе — найденный по IP.
+  String? countryOf(ServerConfig s) => s.country ?? _geo[s.address];
+
+  /// Ищем страну по IP для серверов, у которых её нет в названии (по одному, с паузами).
+  Future<void> _resolveGeo() async {
+    if (_geoRunning || Plat.web || !settings.geoLookup) return;
+    _geoRunning = true;
+    try {
+      var changed = false;
+      for (final srv in List<ServerConfig>.of(servers)) {
+        final host = srv.address;
+        if (srv.country != null || _geo.containsKey(host) || !_geoBusy.add(host)) continue;
+        final code = await _lookupCountry(host);
+        if (code != null) {
+          _geo[host] = code;
+          changed = true;
+          notifyListeners();
+        }
+      }
+      if (changed) await _prefs.setString('geo', jsonEncode(_geo));
+    } finally {
+      _geoRunning = false;
+    }
+    // Пока искали, могли добавиться новые серверы.
+    if (settings.geoLookup &&
+        servers.any((x) => x.country == null && !_geo.containsKey(x.address) && !_geoBusy.contains(x.address))) {
+      unawaited(_resolveGeo());
+    }
+  }
+
+  static Future<String?> _lookupCountry(String host) async {
+    try {
+      var ip = InternetAddress.tryParse(host);
+      if (ip == null) {
+        final list = await InternetAddress.lookup(host).timeout(const Duration(seconds: 5));
+        if (list.isEmpty) return null;
+        ip = list.first;
+      }
+      if (ip.isLoopback || ip.isLinkLocal || _privateIp(ip)) return null;
+      // Два бесплатных сервиса: если первый не ответил — второй.
+      final services = <(Uri, String)>[
+        (Uri.parse('https://api.country.is/${ip.address}'), 'country'),
+        (Uri.parse('https://ipwho.is/${ip.address}?fields=success,country_code'), 'country_code'),
+      ];
+      for (final (uri, field) in services) {
+        try {
+          final r = await http.get(uri).timeout(const Duration(seconds: 6));
+          if (r.statusCode != 200) continue;
+          final v = (jsonDecode(r.body) as Map<String, dynamic>)[field];
+          if (v is String && v.length == 2) {
+            final c = v.toLowerCase() == 'uk' ? 'gb' : v.toLowerCase();
+            if (flagCodes.contains(c)) return c;
+          }
+        } catch (_) {}
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  static bool _privateIp(InternetAddress ip) {
+    final b = ip.rawAddress;
+    if (ip.type == InternetAddressType.IPv4) {
+      return b[0] == 10 ||
+          (b[0] == 172 && b[1] >= 16 && b[1] < 32) ||
+          (b[0] == 192 && b[1] == 168) ||
+          (b[0] == 100 && b[1] >= 64 && b[1] < 128) ||
+          b[0] == 127 ||
+          b[0] == 0;
+    }
+    return (b[0] & 0xfe) == 0xfc; // fc00::/7
+  }
 
   /// iPhone: почему не приходят данные о трафике.
   String? get trafficError {
@@ -231,8 +312,15 @@ class AppState extends ChangeNotifier {
     deviceId = _prefs.getString('deviceId') ?? _newDeviceId();
     await _prefs.setString('deviceId', deviceId);
     settings = AppSettings.decode(_prefs.getString('settings'));
+    try {
+      final g = jsonDecode(_prefs.getString('geo') ?? '{}') as Map<String, dynamic>;
+      g.forEach((k, v) => _geo[k] = '$v');
+    } catch (_) {}
     if (Plat.web && subscriptions.isEmpty && _manualLinks.isEmpty) _addDemoData();
     _rebuildServers();
+
+    _ready = true;
+    unawaited(_resolveGeo());
 
     _statusSub = _backend.status.listen(_onStatus);
     tunAvailable = await _backend.tunAvailable();
@@ -290,6 +378,7 @@ class AppState extends ChangeNotifier {
     }
     await _prefs.setString('settings', settings.encode());
     _scheduleUpdates();
+    unawaited(_resolveGeo());
     if (oldStartup != settings.launchAtStartup || oldMin != settings.startMinimized) {
       await _applyStartup(settings.launchAtStartup);
     }
@@ -394,6 +483,7 @@ class AppState extends ChangeNotifier {
     if (selectedId != autoId && !servers.any((s) => s.id == selectedId)) {
       selectedId = autoId;
     }
+    if (_ready) unawaited(_resolveGeo());
   }
 
   Future<void> _save() async {

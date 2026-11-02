@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../core/country.dart';
 import '../core/settings.dart';
 import '../core/vpn_backend.dart';
 import '../state/app_state.dart';
@@ -399,6 +400,52 @@ class Badge2 extends StatelessWidget {
         child: Text(text,
             style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: dark ? K.onInk : K.ink)),
       );
+}
+
+/// Флаг страны сервера; если страна неизвестна — квадратик с буквами.
+class FlagBadge extends StatelessWidget {
+  const FlagBadge({super.key, required this.code, required this.text, this.dark = false, this.size = 40});
+  final String? code;
+  final String text;
+  final bool dark;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final asset = flagAsset(code);
+    final radius = BorderRadius.circular(size * 0.32);
+    return AnimatedSwitcher(
+      duration: kMedium,
+      switchInCurve: Curves.easeOutCubic,
+      transitionBuilder: (c, a) => FadeTransition(
+        opacity: a,
+        child: ScaleTransition(scale: Tween(begin: 0.85, end: 1.0).animate(a), child: c),
+      ),
+      child: asset == null
+          ? Badge2(key: ValueKey('t$text$dark'), text: text, dark: dark, size: size)
+          : Container(
+              key: ValueKey(asset),
+              width: size,
+              height: size,
+              // Тонкая рамка поверх, чтобы белые флаги (Япония, Финляндия) не сливались с фоном.
+              foregroundDecoration: BoxDecoration(
+                borderRadius: radius,
+                border: Border.all(color: K.ink.withValues(alpha: 0.08)),
+              ),
+              child: ClipRRect(
+                borderRadius: radius,
+                child: Image.asset(
+                  asset,
+                  width: size,
+                  height: size,
+                  fit: BoxFit.cover,
+                  filterQuality: FilterQuality.medium,
+                  gaplessPlayback: true,
+                ),
+              ),
+            ),
+    );
+  }
 }
 
 /// Пинг: числом, шкалой или обоими способами (настройка «Способ отображения»).

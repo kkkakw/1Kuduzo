@@ -135,7 +135,7 @@ class SettingsRoot extends StatelessWidget {
     ];
 
     return ListView(
-      padding: const EdgeInsets.only(bottom: 40),
+      padding: EdgeInsets.only(bottom: 40 + MediaQuery.paddingOf(context).bottom),
       children: [
         if (showTitle)
           const Padding(
@@ -726,6 +726,13 @@ class SubsPage extends StatelessWidget {
         SRadio(title: 'Сортировать по алфавиту', selected: st.sort == ServerSort.name, onTap: () => setS(context, (x) => x.sort = ServerSort.name)),
       ]),
       SGroup(
+        footer: 'Флаг страны берётся из названия сервера (🇳🇱, «Нидерланды», «DE-2»). Если страны в названии нет, '
+            'приложение один раз узнаёт её по IP-адресу сервера через сервисы country.is и ipwho.is.',
+        children: [
+          SSwitch(title: 'Определять страну по IP', value: st.geoLookup, onChanged: (v) => setS(context, (x) => x.geoLookup = v)),
+        ],
+      ),
+      SGroup(
         footer: 'При добавлении той же ссылки существующая подписка обновится, а не появится второй раз.',
         children: [
           SSwitch(title: 'Запретить дубликаты', value: st.forbidDuplicates, onChanged: (v) => setS(context, (x) => x.forbidDuplicates = v)),
@@ -1095,6 +1102,10 @@ class _AboutPageState extends State<AboutPage> {
           ),
         SAction(title: 'Сайт vpnkuduzo.ru', icon: Icons.open_in_new_rounded, onTap: () => openUrl('https://vpnkuduzo.ru')),
       ]),
+      const SGroup(
+        footer: 'Ядро: Xray-core (MPL-2.0). Флаги стран: flag-icons (MIT, Panayiotis Lipiridis).',
+        children: [],
+      ),
     ]);
   }
 }

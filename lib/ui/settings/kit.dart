@@ -91,15 +91,16 @@ class SGroup extends StatelessWidget {
             child: Text(title!.toUpperCase(),
                 style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: K.muted, letterSpacing: 0.6)),
           ),
-        Container(
-          decoration: BoxDecoration(
-            color: K.surface,
-            borderRadius: BorderRadius.circular(22),
-            border: K.isDark ? Border.all(color: K.line) : null,
+        if (rows.isNotEmpty)
+          Container(
+            decoration: BoxDecoration(
+              color: K.surface,
+              borderRadius: BorderRadius.circular(22),
+              border: K.isDark ? Border.all(color: K.line) : null,
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Material(type: MaterialType.transparency, child: Column(children: rows)),
           ),
-          clipBehavior: Clip.antiAlias,
-          child: Material(type: MaterialType.transparency, child: Column(children: rows)),
-        ),
         if (footer != null)
           Padding(
             padding: const EdgeInsets.fromLTRB(18, 8, 18, 0),

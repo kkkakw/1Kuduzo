@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:kuduzo/core/country.dart';
 import 'package:kuduzo/core/link_parser.dart';
 import 'package:kuduzo/core/settings.dart';
 import 'package:kuduzo/core/vpn_backend.dart';
@@ -180,5 +181,32 @@ void main() {
     expect(b.pingView, PingView.both);
     expect(b.onDemandExcludedSsids, ['Home']);
     expect(AppSettings.decode('мусор').pingMethod, PingMethod.real);
+  });
+
+  test('страна сервера по названию и адресу', () {
+    final cases = {
+      '🇪🇪 Эстония': 'ee',
+      'Нидерланды': 'nl',
+      'Сервер в Германии': 'de',
+      'DE-2 Frankfurt': 'de',
+      'US West': 'us',
+      'Великобритания': 'gb',
+      'Финляндия 🔥': 'fi',
+      'Япония': 'jp',
+      'Tokyo #3': 'jp',
+      'Казахстан, Алматы': 'kz',
+      'Быстрый 🇸🇪': 'se',
+      '\u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F} London': 'gb-eng',
+      'nl-3': 'nl',
+    };
+    cases.forEach((name, code) => expect(Country.detect(name), code, reason: name));
+    expect(Country.detect('Осталось 50 GB'), isNull);
+    expect(Country.detect('VLESS Reality'), isNull);
+    expect(Country.detect('Сервер 1', host: 'nl1.example.com'), 'nl');
+    expect(Country.detect('Сервер 1', host: 'my.vpn.com'), isNull);
+    expect(Country.detect('Сервер 1', host: '203.0.113.10'), isNull);
+    expect(flagAsset('NL'), 'assets/flags/nl.png');
+    expect(flagAsset('zz'), isNull);
+    expect(File('assets/flags/nl.png').existsSync(), isTrue);
   });
 }
