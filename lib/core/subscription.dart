@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import 'link_parser.dart';
+import 'platform.dart';
 import 'server.dart';
 
 /// Подписка: ссылка, по которой сервер отдаёт список ключей.
@@ -77,6 +78,9 @@ class SubscriptionClient {
   static const userAgent = 'v2rayN/7.10.0';
 
   static Future<void> refresh(Subscription sub, {String? deviceId, String? agent}) async {
+    if (Plat.web) {
+      throw SubscriptionException('В демо-версии внутри чата подписки не загружаются — проверьте на телефоне или компьютере');
+    }
     final http.Response res;
     try {
       res = await http.get(Uri.parse(sub.url), headers: {

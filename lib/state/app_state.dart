@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/link_parser.dart';
 import '../core/ping.dart';
+import '../core/platform.dart';
 import '../core/server.dart';
 import '../core/settings.dart';
 import '../core/subscription.dart';
@@ -49,10 +50,16 @@ class AppState extends ChangeNotifier {
   String deviceId = '';
 
   bool get isOn => state == VpnState.connected || state == VpnState.connecting;
-  bool get isDesktop => Platform.isWindows || Platform.isMacOS || Platform.isLinux;
+  bool get isDesktop => Plat.desktop;
 
   Future<void> load() async {
-    _prefs = await SharedPreferences.getInstance();
+    try {
+      _prefs = await SharedPreferences.getInstance();
+    } catch (_) {
+      // В песочнице браузера хранилище может быть недоступно — работаем в памяти.
+      SharedPreferences.setMockInitialValues({});
+      _prefs = await SharedPreferences.getInstance();
+    }
     final subsJson = _prefs.getString('subs');
     if (subsJson != null) {
       for (final j in jsonDecode(subsJson) as List) {
@@ -67,6 +74,7 @@ class AppState extends ChangeNotifier {
     deviceId = _prefs.getString('deviceId') ?? _newDeviceId();
     await _prefs.setString('deviceId', deviceId);
     settings = AppSettings.decode(_prefs.getString('settings'));
+    if (Plat.web && subscriptions.isEmpty && _manualLinks.isEmpty) _addDemoData();
     _rebuildServers();
 
     _statusSub = _backend.status.listen(_onStatus);
@@ -78,8 +86,27 @@ class AppState extends ChangeNotifier {
     unawaited(_onLaunch());
   }
 
+  /// Веб-демо: выдуманные серверы, чтобы было что посмотреть.
+  void _addDemoData() {
+    const names = ['🇳🇱 Нидерланды', '🇪🇪 Эстония', '🇩🇪 Германия', '🇫🇮 Финляндия', '🇹🇷 Турция'];
+    final links = <String>[
+      for (var i = 0; i < names.length; i++)
+        'vless://00000000-0000-0000-0000-00000000000${i + 1}@203.0.113.${11 + i}:443'
+            '?type=xhttp&security=reality&fp=firefox&sni=vpnkuduzo.ru'
+            '&pbk=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&sid=01&path=/demo#${Uri.encodeComponent(names[i])}',
+    ];
+    subscriptions.add(Subscription(
+      id: 'demo',
+      url: 'https://vpnkuduzo.ru/sub/demo',
+      title: 'Kuduzo (демо)',
+      expire: DateTime(2027, 10, 18),
+      updatedAt: DateTime.now(),
+      links: links,
+    ));
+  }
+
   Future<void> _onLaunch() async {
-    if (settings.updateOnLaunch && subscriptions.isNotEmpty) {
+    if (settings.updateOnLaunch && subscriptions.isNotEmpty && !Plat.web) {
       await refreshAll(silent: true, ping: false);
     }
     if (settings.pingOnLaunch) await pingAll();
@@ -105,7 +132,7 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> _applyStartup(bool on) async {
-    if (!Platform.isWindows) return;
+    if (!Plat.windows) return;
     const key = r'HKCU\Software\Microsoft\Windows\CurrentVersion\Run';
     try {
       if (on) {

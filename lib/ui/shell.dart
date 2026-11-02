@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../core/platform.dart';
 import '../theme.dart';
 import 'home_panel.dart';
 import 'servers_panel.dart';
@@ -45,7 +46,21 @@ class _ShellState extends State<Shell> {
     }
     return Scaffold(
       body: SafeArea(
-        child: Padding(padding: const EdgeInsets.fromLTRB(22, 12, 22, 0), child: body),
+        child: Column(children: [
+          if (Plat.web)
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(color: K.chip, borderRadius: BorderRadius.circular(14)),
+              child: const Text(
+                'Демо-версия: интерфейс как на Android, но VPN внутри чата не подключается',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 12.5, color: K.text2, fontWeight: FontWeight.w500),
+              ),
+            ),
+          Expanded(child: Padding(padding: const EdgeInsets.fromLTRB(22, 12, 22, 0), child: body)),
+        ]),
       ),
       bottomNavigationBar: NavigationBar(
         backgroundColor: K.surface,

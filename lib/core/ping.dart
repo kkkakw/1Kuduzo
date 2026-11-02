@@ -5,6 +5,7 @@ import 'dart:math';
 
 import 'package:path_provider/path_provider.dart';
 
+import 'platform.dart';
 import 'server.dart';
 import 'settings.dart';
 import 'vpn_backend.dart';
@@ -12,7 +13,7 @@ import 'xray_config.dart';
 
 /// Замер задержки серверов. Результат: мс; -1 — нет ответа; -2 — метод не подходит (UDP и т.п.).
 class Pinger {
-  static bool get _desktop => Platform.isWindows || Platform.isMacOS || Platform.isLinux;
+  static bool get _desktop => Plat.desktop;
 
   /// Какие методы доступны на этой платформе.
   static List<PingMethod> get available => _desktop
@@ -24,6 +25,7 @@ class Pinger {
     AppSettings st, {
     void Function(String id, int ms)? onResult,
   }) async {
+    if (Plat.web) return _demo(servers, onResult);
     var method = st.pingMethod;
     if (!available.contains(method)) method = PingMethod.tcp;
     final timeout = Duration(seconds: st.pingTimeoutSec.clamp(1, 30).toInt());
@@ -42,6 +44,18 @@ class Pinger {
       case PingMethod.httpGet:
       case PingMethod.httpHead:
         await _viaXray(servers, st, method, timeout, put);
+    }
+    return out;
+  }
+
+  /// Веб-демо: браузер не может мерить пинг до серверов — показываем правдоподобные числа.
+  static Future<Map<String, int>> _demo(List<ServerConfig> servers, void Function(String, int)? onResult) async {
+    final out = <String, int>{};
+    for (final s in servers) {
+      await Future<void>.delayed(const Duration(milliseconds: 180));
+      final ms = 28 + (int.parse(s.id, radix: 16) % 120);
+      out[s.id] = ms;
+      onResult?.call(s.id, ms);
     }
     return out;
   }

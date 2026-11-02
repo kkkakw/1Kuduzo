@@ -1,9 +1,8 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../core/ping.dart';
+import '../core/platform.dart';
 import '../core/settings.dart';
 import '../core/vpn_backend.dart';
 import '../state/app_state.dart';
@@ -39,7 +38,7 @@ class SettingsPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = AppScope.of(context);
     final st = s.settings;
-    final win = Platform.isWindows;
+    final win = Plat.windows;
     final desktop = s.isDesktop;
 
     Future<void> set(void Function(AppSettings x) f, {bool reconnect = false}) =>

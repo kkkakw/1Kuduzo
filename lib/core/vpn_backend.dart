@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'platform.dart';
 import 'server.dart';
 import 'settings.dart';
 import 'system_proxy.dart';
@@ -33,7 +34,8 @@ abstract class VpnBackend {
   List<String> get logs => const [];
 
   static VpnBackend create() {
-    if (Platform.isAndroid || Platform.isIOS) return MobileVpnBackend();
+    if (Plat.web) return DemoVpnBackend();
+    if (Plat.mobile) return MobileVpnBackend();
     return DesktopVpnBackend();
   }
 }
@@ -251,5 +253,34 @@ class DesktopVpnBackend implements VpnBackend {
     } else {
       _ctrl.add(const VpnStatus(VpnState.disconnected));
     }
+  }
+}
+
+/// Веб-демо внутри чата: настоящий VPN из браузера невозможен, поэтому только показываем состояния.
+class DemoVpnBackend implements VpnBackend {
+  final _ctrl = StreamController<VpnStatus>.broadcast();
+  final List<String> _logs = [];
+
+  @override
+  Stream<VpnStatus> get status => _ctrl.stream;
+
+  @override
+  List<String> get logs => List.unmodifiable(_logs);
+
+  @override
+  Future<bool> tunAvailable() async => false;
+
+  @override
+  Future<void> start(ServerConfig server, RoutingMode routing, {required bool tun, AppSettings? settings}) async {
+    _ctrl.add(const VpnStatus(VpnState.connecting));
+    _logs.add('демо: подключение к ${server.name}');
+    await Future<void>.delayed(const Duration(milliseconds: 1200));
+    _ctrl.add(const VpnStatus(VpnState.connected));
+  }
+
+  @override
+  Future<void> stop() async {
+    _logs.add('демо: отключено');
+    _ctrl.add(const VpnStatus(VpnState.disconnected));
   }
 }

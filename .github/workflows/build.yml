@@ -128,3 +128,34 @@ jobs:
           name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'Kuduzo — последняя сборка' }}
           make_latest: true
           files: dist/*.zip
+
+  web:
+    name: Веб-демо
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Подготовка проекта
+        run: bash scripts/prepare.sh web
+      - name: Сборка
+        run: flutter build web --release --no-web-resources-cdn --pwa-strategy=none || flutter build web --release --pwa-strategy=none
+      - name: Архив
+        run: |
+          sed -i 's|<base href="/">||' build/web/index.html
+          mkdir -p dist
+          (cd build/web && zip -qr ../../dist/Kuduzo-web-demo.zip .)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Kuduzo-Web
+          path: dist/*.zip
+      - name: Релиз
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'latest' }}
+          name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'Kuduzo — последняя сборка' }}
+          make_latest: true
+          files: dist/*.zip
