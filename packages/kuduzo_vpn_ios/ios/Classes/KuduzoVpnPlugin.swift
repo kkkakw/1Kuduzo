@@ -78,6 +78,12 @@ public class KuduzoVpnPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
     case "stats":
       ask("stats") { result($0) }
 
+    case "pingTcp":
+      let args = call.arguments as? [String: Any] ?? [:]
+      let list = args["list"] as? String ?? ""
+      let timeout = args["timeoutMs"] as? Int ?? 3000
+      ask("ping\n\(timeout)\n\(list)") { result($0) }
+
     case "logs":
       ask("logs") { reply in
         if reply.hasPrefix("err:") {

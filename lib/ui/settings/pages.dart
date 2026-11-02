@@ -757,7 +757,13 @@ class PingPage extends StatelessWidget {
     final st = s.settings;
     final effective = Pinger.available.contains(st.pingMethod) ? st.pingMethod : PingMethod.tcp;
     return SettingsPage(title: 'Пинг', children: [
-      SGroup(title: 'Протоколы пинга', children: [
+      SGroup(
+        title: 'Протоколы пинга',
+        footer: Plat.ios
+            ? 'На iPhone пинг — время TCP-соединения с сервером. При включённом VPN замер делает само расширение VPN '
+                'напрямую, мимо туннеля, поэтому числа честные.'
+            : null,
+        children: [
         for (final m in Pinger.available)
           SRadio(
             title: SettingsLabels.method(m) + (m == PingMethod.real ? ' (рекомендуется)' : ''),
@@ -765,7 +771,8 @@ class PingPage extends StatelessWidget {
             selected: effective == m,
             onTap: () => setS(context, (x) => x.pingMethod = m),
           ),
-      ]),
+        ],
+      ),
       SGroup(title: 'Таймаут', children: [
         SSlider(
           title: 'Таймаут пинга',

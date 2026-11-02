@@ -15,15 +15,20 @@ import 'xray_config.dart';
 class Pinger {
   static bool get _desktop => Plat.desktop;
 
-  /// Какие методы доступны на этой платформе.
+  /// Какие методы доступны на этой платформе. На iPhone приложение не может запускать команду ping.
   static List<PingMethod> get available => _desktop
       ? PingMethod.values
-      : const [PingMethod.tcp, PingMethod.icmp];
+      : Plat.ios
+          ? const [PingMethod.tcp]
+          : const [PingMethod.tcp, PingMethod.icmp];
 
+  /// [tunnel] — включённый VPN на iPhone: тогда замер делает расширение VPN, иначе туннель
+  /// перехватит соединение и ответит сам за 1–2 мс.
   static Future<Map<String, int>> pingAll(
     List<ServerConfig> servers,
     AppSettings st, {
     void Function(String id, int ms)? onResult,
+    MobileVpnBackend? tunnel,
   }) async {
     if (Plat.web) return _demo(servers, onResult);
     var method = st.pingMethod;
@@ -33,6 +38,22 @@ class Pinger {
     void put(String id, int ms) {
       out[id] = ms;
       onResult?.call(id, ms);
+    }
+
+    if (tunnel != null && Plat.ios) {
+      for (final s in servers.where((s) => s.protocol == 'hysteria2')) {
+        put(s.id, -2); // UDP — TCP-пингом не измерить
+      }
+      final tcpServers = servers.where((s) => s.protocol != 'hysteria2').toList();
+      // Порциями по 8, чтобы числа появлялись постепенно.
+      for (var i = 0; i < tcpServers.length; i += 8) {
+        final part = tcpServers.sublist(i, min(i + 8, tcpServers.length));
+        final r = await tunnel.pingInTunnel(part, timeout);
+        for (final s in part) {
+          put(s.id, r?[s.id] ?? -1);
+        }
+      }
+      return out;
     }
 
     switch (method) {

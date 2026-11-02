@@ -226,6 +226,31 @@ class MobileVpnBackend implements VpnBackend {
     return (up: up, down: down);
   }
 
+  /// iPhone с включённым VPN: TCP-пинг из расширения VPN (его соединения идут мимо туннеля).
+  /// Ответ: id → мс (-1 — нет ответа); null — расширение не ответило.
+  Future<Map<String, int>?> pingInTunnel(List<ServerConfig> servers, Duration timeout) async {
+    final list = servers.map((s) => '${s.id} ${s.address} ${s.port}').join('\n');
+    try {
+      final reply = await _ch.invokeMethod<String>('pingTcp', {
+        'list': list,
+        'timeoutMs': timeout.inMilliseconds,
+      }).timeout(timeout * 2 + const Duration(seconds: 3));
+      if (reply == null || reply.startsWith('err:')) {
+        _note('Пинг: ${reply == null ? 'нет ответа' : reply.substring(4)}');
+        return null;
+      }
+      final out = <String, int>{};
+      for (final line in reply.split('\n')) {
+        final f = line.trim().split(' ');
+        if (f.length == 2) out[f[0]] = int.tryParse(f[1]) ?? -1;
+      }
+      return out;
+    } catch (e) {
+      _note('Пинг: $e');
+      return null;
+    }
+  }
+
   @override
   Future<List<String>> fetchLogs() async {
     if (Plat.ios) {

@@ -68,7 +68,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     completionHandler()
   }
 
-  /// Сообщения от приложения: «stats» → «отправлено,получено,память», «logs» → журнал ядра.
+  /// Сообщения от приложения: «stats» → «отправлено,получено,память», «logs» → журнал ядра, «ping…» → пинг серверов.
   override func handleAppMessage(_ messageData: Data, completionHandler: ((Data?) -> Void)?) {
     let command = String(data: messageData, encoding: .utf8) ?? ""
     switch command {
@@ -79,7 +79,18 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     case "logs":
       completionHandler?(KuduzocoreLogs().data(using: .utf8))
     default:
-      completionHandler?(nil)
+      // «ping\n<тайм-аут мс>\n<id адрес порт>…» — замер идёт отсюда, мимо туннеля.
+      if command.hasPrefix("ping\n") {
+        let parts = command.split(separator: "\n", maxSplits: 2, omittingEmptySubsequences: false)
+        let timeout = parts.count > 1 ? Int(parts[1]) ?? 3000 : 3000
+        let list = parts.count > 2 ? String(parts[2]) : ""
+        DispatchQueue.global(qos: .userInitiated).async {
+          let reply = KuduzocorePingTCP(list, timeout)
+          completionHandler?(reply.data(using: .utf8))
+        }
+      } else {
+        completionHandler?(nil)
+      }
     }
   }
 
