@@ -105,7 +105,7 @@ class HomePanel extends StatelessWidget {
         const SizedBox(height: 14),
         Segmented<RoutingMode>(
           items: const [
-            (RoutingMode.smart, 'Только заблокированное'),
+            (RoutingMode.smart, 'Зарубежные сайты'),
             (RoutingMode.all, 'Весь трафик'),
           ],
           value: s.routing,
@@ -143,13 +143,11 @@ class _Headline extends StatelessWidget {
     final style = TextStyle(fontSize: size, height: 1.08, fontWeight: FontWeight.w800, letterSpacing: -1.2);
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 250),
-      child: Column(
+      child: Text(
+        on ? 'Соединение защищено' : 'Подключить',
         key: ValueKey(on),
-        children: [
-          Text(on ? 'Готово.' : 'Интернет без ограничений.',
-              textAlign: TextAlign.center, style: style.copyWith(color: K.headlineGray)),
-          Text(on ? 'Всё открывается.' : 'Одной кнопкой.', textAlign: TextAlign.center, style: style),
-        ],
+        textAlign: TextAlign.center,
+        style: style,
       ),
     );
   }

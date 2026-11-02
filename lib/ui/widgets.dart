@@ -306,7 +306,7 @@ void toast(BuildContext context, String text) {
 String statusText(AppState s) {
   switch (s.state) {
     case VpnState.connected:
-      return 'VPN включён. Всё открывается.';
+      return 'VPN включён';
     case VpnState.connecting:
       return 'Подключаемся…';
     case VpnState.error:

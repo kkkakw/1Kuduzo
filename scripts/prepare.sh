@@ -18,6 +18,19 @@ fi
 flutter create --platforms="$PLATFORM" --org ru.kuduzo --project-name kuduzo .
 rm -f test/widget_test.dart
 
+# 2. Иконки из assets/icon (только для собираемой платформы)
+flutter pub get
+ICONS=.dl/icons.yaml
+mkdir -p .dl
+case "$PLATFORM" in
+  android) printf 'flutter_launcher_icons:\n  image_path: "assets/icon/icon.png"\n  android: true\n  ios: false\n  adaptive_icon_background: "#000000"\n  adaptive_icon_foreground: "assets/icon/foreground.png"\n' > "$ICONS" ;;
+  ios)     printf 'flutter_launcher_icons:\n  image_path: "assets/icon/icon.png"\n  android: false\n  ios: true\n  remove_alpha_ios: true\n' > "$ICONS" ;;
+  windows) printf 'flutter_launcher_icons:\n  android: false\n  ios: false\n  windows:\n    generate: true\n    image_path: "assets/icon/icon.png"\n    icon_size: 256\n' > "$ICONS" ;;
+  macos)   printf 'flutter_launcher_icons:\n  android: false\n  ios: false\n  macos:\n    generate: true\n    image_path: "assets/icon/icon_macos.png"\n' > "$ICONS" ;;
+  web)     printf 'flutter_launcher_icons:\n  android: false\n  ios: false\n  web:\n    generate: true\n    image_path: "assets/icon/icon.png"\n    background_color: "#000000"\n    theme_color: "#000000"\n' > "$ICONS" ;;
+esac
+dart run flutter_launcher_icons -f "$ICONS"
+
 mkdir -p .dl
 fetch() { curl -fsSL --retry 3 -o "$2" "$1"; }
 extract() {
@@ -60,8 +73,27 @@ EOF
       extract .dl/wintun.zip .dl
       cp .dl/wintun/bin/amd64/wintun.dll .dl/xray-win/
     fi
-    # Заголовок окна
-    sed -i 's/L"kuduzo"/L"Kuduzo"/' windows/runner/main.cpp || true
+    # Заголовок окна и сведения о программе
+    sed -i 's/L"kuduzo"/L"Kuduzo VPN"/' windows/runner/main.cpp || true
+    sed -i 's/VALUE "ProductName", "kuduzo"/VALUE "ProductName", "Kuduzo VPN"/; s/VALUE "FileDescription", "kuduzo"/VALUE "FileDescription", "Kuduzo VPN"/' windows/runner/Runner.rc || true
+    ;;
+
+  ios)
+    fetch "$XRAY_BASE/Xray-macos-arm64-v8a.zip" .dl/xray-mac-arm.zip
+    extract .dl/xray-mac-arm.zip .dl/mac-arm
+    cp .dl/mac-arm/geoip.dat ios/PacketTunnel/geoip.dat
+    PL=ios/Runner/Info.plist
+    /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Kuduzo VPN" "$PL" || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Kuduzo VPN" "$PL"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleName Kuduzo VPN" "$PL" || true
+    # Ссылки kuduzo:// и камера для QR
+    /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes array" "$PL" || true
+    /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0 dict" "$PL" || true
+    /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLName string ru.kuduzo.link" "$PL" || true
+    /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes array" "$PL" || true
+    /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string kuduzo" "$PL" || true
+    /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string Камера нужна, чтобы сканировать QR-код с ключом" "$PL" || true
+    # Минимальная iOS 15 (нужна расширению VPN)
+    sed -i '' "s/^# platform :ios.*/platform :ios, '15.0'/" ios/Podfile || true
     ;;
 
   macos)
@@ -77,7 +109,7 @@ EOF
     for f in macos/Runner/DebugProfile.entitlements macos/Runner/Release.entitlements; do
       /usr/libexec/PlistBuddy -c "Set :com.apple.security.app-sandbox false" "$f"
     done
-    sed -i '' 's/^PRODUCT_NAME = .*/PRODUCT_NAME = Kuduzo/' macos/Runner/Configs/AppInfo.xcconfig
+    sed -i '' 's/^PRODUCT_NAME = .*/PRODUCT_NAME = Kuduzo VPN/' macos/Runner/Configs/AppInfo.xcconfig
     ;;
 esac
 

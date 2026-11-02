@@ -79,7 +79,8 @@ class MobileVpnBackend implements VpnBackend {
       return;
     }
     final config =
-        XrayConfigBuilder.build(server, routing: routing, inbound: InboundMode.tunMobile, settings: settings);
+        XrayConfigBuilder.build(server,
+            routing: routing, inbound: InboundMode.tunMobile, settings: settings, lite: Plat.ios);
     _ctrl.add(const VpnStatus(VpnState.connecting));
     await _ch.invokeMethod('start', {'config': jsonEncode(config), 'name': server.name});
   }

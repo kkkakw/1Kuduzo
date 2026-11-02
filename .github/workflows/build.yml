@@ -110,7 +110,7 @@ jobs:
         run: flutter build macos --release
       - name: Ядро внутрь приложения и подпись
         run: |
-          APP=build/macos/Build/Products/Release/Kuduzo.app
+          APP="build/macos/Build/Products/Release/Kuduzo VPN.app"
           mkdir -p "$APP/Contents/Resources/xray"
           cp .dl/xray-mac/xray .dl/xray-mac/geoip.dat .dl/xray-mac/geosite.dat "$APP/Contents/Resources/xray/"
           codesign --force --deep --sign - "$APP"
@@ -159,3 +159,58 @@ jobs:
           name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'Kuduzo — последняя сборка' }}
           make_latest: true
           files: dist/*.zip
+
+  ios:
+    name: iOS (IPA без подписи)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache-dependency-path: ios_core/go.sum
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Ядро Xray для iOS (gomobile)
+        working-directory: ios_core
+        run: |
+          go mod tidy
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          gomobile init
+          gomobile bind -target=ios -iosversion=15.0 -trimpath -ldflags='-s -w -buildid= -checklinkname=0' -o ../build/ios-core/Kuduzocore.xcframework .
+          ls -la ../build/ios-core
+      - name: Подготовка проекта
+        run: bash scripts/prepare.sh ios
+      - name: Network Extension в Xcode-проект
+        run: |
+          VER=$(grep '^version:' pubspec.yaml | sed 's/version: *//')
+          ruby scripts/ios_add_extension.rb "${VER%%+*}" "${VER##*+}"
+      - name: Сборка
+        run: |
+          flutter build ios --config-only --release --no-codesign || true
+          if [ -f ios/Podfile ]; then
+            sed -i '' "s/^# platform :ios.*/platform :ios, '15.0'/" ios/Podfile
+            grep -n "platform :ios" ios/Podfile || true
+          fi
+          flutter build ios --release --no-codesign
+      - name: IPA
+        run: |
+          mkdir -p dist/Payload
+          cp -R build/ios/iphoneos/Runner.app dist/Payload/
+          ls dist/Payload/Runner.app/PlugIns
+          (cd dist && zip -qry Kuduzo-VPN-ios-unsigned.ipa Payload && rm -rf Payload)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Kuduzo-iOS
+          path: dist/*.ipa
+      - name: Релиз
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'latest' }}
+          name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'Kuduzo — последняя сборка' }}
+          make_latest: true
+          files: dist/*.ipa

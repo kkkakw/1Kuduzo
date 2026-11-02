@@ -285,7 +285,7 @@ class SettingsPanel extends StatelessWidget {
         _Section(title: 'Производительность', icon: Icons.tune_rounded, children: [
           _SwitchRow(
             title: 'Анализ трафика',
-            subtitle: 'Sniffing: определение сайта, нужно для режима «Только заблокированное»',
+            subtitle: 'Sniffing: определение сайта, нужно для режима «Зарубежные сайты»',
             value: st.sniffing,
             onChanged: (v) => set((x) => x.sniffing = v, reconnect: true),
           ),

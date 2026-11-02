@@ -32,6 +32,7 @@ class XrayConfigBuilder {
     required InboundMode inbound,
     AppSettings? settings,
     bool windows = false,
+    bool lite = false, // iOS: без geosite.dat — расширению VPN доступно ~50 МБ памяти
   }) {
     final st = settings ?? AppSettings();
     final sniffing = {
@@ -103,7 +104,7 @@ class XrayConfigBuilder {
       if (routing == RoutingMode.smart) ...[
         {
           'type': 'field',
-          'domain': ['geosite:category-ru', 'domain:ru', 'domain:su', 'domain:xn--p1ai'],
+          'domain': [if (!lite) 'geosite:category-ru', 'domain:ru', 'domain:su', 'domain:xn--p1ai'],
           'outboundTag': 'direct',
         },
         {

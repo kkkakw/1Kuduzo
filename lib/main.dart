@@ -46,7 +46,7 @@ class _KuduzoAppState extends State<KuduzoApp> {
     return AppScope(
       state: widget.state,
       child: MaterialApp(
-        title: 'Kuduzo',
+        title: 'Kuduzo VPN',
         debugShowCheckedModeBanner: false,
         theme: K.theme(),
         home: const Shell(),
