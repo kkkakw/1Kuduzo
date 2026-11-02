@@ -41,6 +41,8 @@ class SettingsPanel extends StatelessWidget {
     final win = Plat.windows;
     final desktop = s.isDesktop;
 
+    final effectiveMethod = Pinger.available.contains(st.pingMethod) ? st.pingMethod : PingMethod.tcp;
+
     Future<void> set(void Function(AppSettings x) f, {bool reconnect = false}) =>
         s.updateSettings(f, reconnect: reconnect);
 
@@ -58,7 +60,7 @@ class SettingsPanel extends StatelessWidget {
             _RadioRow(
               title: methodTitle(m) + (m == PingMethod.real ? ' (рекомендуется)' : ''),
               subtitle: methodDesc(m),
-              selected: st.pingMethod == m,
+              selected: effectiveMethod == m,
               onTap: () => set((x) => x.pingMethod = m),
             ),
           const _Divider(),
