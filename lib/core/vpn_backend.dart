@@ -112,6 +112,8 @@ class MobileVpnBackend implements VpnBackend {
         lite: Plat.ios,
         stats: st.statsEnabled || st.showMemory);
     _ctrl.add(const VpnStatus(VpnState.connecting));
+    _prevUp = _prevDown = null;
+    _statsError = null;
     await _ch.invokeMethod('start', {
       'config': jsonEncode(config),
       'name': server.name,
@@ -151,23 +153,62 @@ class MobileVpnBackend implements VpnBackend {
   }
 
   int? _memoryBytes;
+  int? _prevUp, _prevDown;
+  String? _statsError;
+  final List<String> _diag = [];
 
   /// iPhone: сколько памяти занимает ядро в расширении VPN.
   int? get memoryBytes => _memoryBytes;
 
+  /// iPhone: почему нет данных о трафике (null — всё в порядке).
+  String? get statsError => _statsError;
+
+  void _setStatsError(String? e) {
+    if (e != null && e != _statsError) _note('Трафик: $e');
+    _statsError = e;
+  }
+
+  void _note(String line) {
+    final t = DateTime.now();
+    String two(int v) => v.toString().padLeft(2, '0');
+    _diag.add('${two(t.hour)}:${two(t.minute)}:${two(t.second)}  $line');
+    if (_diag.length > 100) _diag.removeRange(0, _diag.length - 100);
+  }
+
   @override
   Future<({int up, int down})?> trafficDelta() async {
     try {
-      final s = await _ch.invokeMethod<String>('stats') ?? '';
+      final s = (await _ch.invokeMethod<String>('stats').timeout(const Duration(seconds: 4)) ?? '').trim();
       if (Plat.ios) {
-        // Расширение VPN отвечает «up,down,memory».
+        if (s.startsWith('err:')) {
+          _setStatsError(s.substring(4));
+          return null;
+        }
+        // Расширение VPN отвечает «отправлено,получено,память» — итог с момента подключения.
         final f = s.split(',');
-        if (f.length < 2) return null;
-        if (f.length >= 3) _memoryBytes = int.tryParse(f[2]);
-        return (up: int.tryParse(f[0]) ?? 0, down: int.tryParse(f[1]) ?? 0);
+        final up = f.isNotEmpty ? int.tryParse(f[0].trim()) : null;
+        final down = f.length > 1 ? int.tryParse(f[1].trim()) : null;
+        if (up == null || down == null) {
+          _setStatsError(s.isEmpty ? 'расширение VPN не ответило' : 'непонятный ответ «$s»');
+          return null;
+        }
+        _setStatsError(null);
+        if (f.length >= 3) _memoryBytes = int.tryParse(f[2].trim());
+        final pu = _prevUp, pd = _prevDown;
+        _prevUp = up;
+        _prevDown = down;
+        // Первый ответ (или ядро перезапустилось) — весь трафик сессии, дальше — прирост.
+        return (
+          up: pu == null || up < pu ? up : up - pu,
+          down: pd == null || down < pd ? down : down - pd,
+        );
       }
       return parseLibStats(s);
-    } catch (_) {
+    } on TimeoutException {
+      _setStatsError('расширение VPN не ответило за 4 с');
+      return null;
+    } catch (e) {
+      _setStatsError('$e');
       return null;
     }
   }
@@ -187,7 +228,15 @@ class MobileVpnBackend implements VpnBackend {
 
   @override
   Future<List<String>> fetchLogs() async {
-    if (!Plat.android) return const ['Журнал на iPhone пока недоступен'];
+    if (Plat.ios) {
+      List<String> core;
+      try {
+        core = await _ch.invokeListMethod<String>('logs').timeout(const Duration(seconds: 4)) ?? const [];
+      } catch (e) {
+        core = ['Журнал ядра доступен, когда VPN включён ($e)'];
+      }
+      return [..._diag, ...core];
+    }
     try {
       final list = await _ch.invokeListMethod<String>('logs') ?? const [];
       return list;

@@ -76,20 +76,15 @@ public class KuduzoVpnPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
       }
 
     case "stats":
-      guard let session = manager?.connection as? NETunnelProviderSession,
-            session.status == .connected,
-            let data = "stats".data(using: .utf8) else {
-        result(nil)
-        return
-      }
-      do {
-        try session.sendProviderMessage(data) { reply in
-          DispatchQueue.main.async {
-            result(reply.flatMap { String(data: $0, encoding: .utf8) })
-          }
+      ask("stats") { result($0) }
+
+    case "logs":
+      ask("logs") { reply in
+        if reply.hasPrefix("err:") {
+          result(["Не удалось получить журнал ядра: " + String(reply.dropFirst(4))])
+        } else {
+          result(reply.split(separator: "\n").map(String.init))
         }
-      } catch {
-        result(nil)
       }
 
     case "start":
@@ -153,6 +148,50 @@ public class KuduzoVpnPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
   }
 
   // MARK: - Помощники
+
+  /// Сессия туннеля, если он сейчас работает.
+  private static func activeSession(_ m: NETunnelProviderManager?) -> NETunnelProviderSession? {
+    guard let s = m?.connection as? NETunnelProviderSession else { return nil }
+    switch s.status {
+    case .connected, .reasserting: return s
+    default: return nil
+    }
+  }
+
+  /// Вопрос расширению VPN. Ответ — текст или «err:причина».
+  /// Если сохранённый менеджер устарел (например, после изменения настроек), находим работающий туннель заново.
+  private func ask(_ command: String, _ done: @escaping (String) -> Void) {
+    func send(_ session: NETunnelProviderSession) {
+      do {
+        try session.sendProviderMessage(Data(command.utf8)) { reply in
+          let text = reply.flatMap { String(data: $0, encoding: .utf8) } ?? "err:расширение VPN не ответило"
+          DispatchQueue.main.async { done(text) }
+        }
+      } catch {
+        let ns = error as NSError
+        DispatchQueue.main.async { done("err:\(ns.domain) \(ns.code): \(ns.localizedDescription)") }
+      }
+    }
+    if let s = Self.activeSession(manager) {
+      send(s)
+      return
+    }
+    NETunnelProviderManager.loadAllFromPreferences { [weak self] list, error in
+      DispatchQueue.main.async {
+        guard let self = self else { return }
+        let all = list ?? []
+        if let m = all.first(where: { Self.activeSession($0) != nil }), let s = Self.activeSession(m) {
+          self.manager = m
+          self.observe(m)
+          send(s)
+        } else {
+          let status = self.manager.map { "\($0.connection.status.rawValue)" } ?? "нет"
+          let extra = error.map { ", \($0.localizedDescription)" } ?? ""
+          done("err:работающий туннель не найден (профилей VPN: \(all.count), статус \(status)\(extra))")
+        }
+      }
+    }
+  }
 
   private func loadManager(_ done: @escaping (NETunnelProviderManager?, Error?) -> Void) {
     NETunnelProviderManager.loadAllFromPreferences { list, error in

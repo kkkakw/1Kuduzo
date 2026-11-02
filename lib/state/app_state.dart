@@ -60,6 +60,14 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  String? _shownTrafficError;
+
+  /// iPhone: почему не приходят данные о трафике.
+  String? get trafficError {
+    final b = _backend;
+    return b is MobileVpnBackend ? b.statsError : null;
+  }
+
   /// iPhone: память ядра в расширении VPN (байт).
   int? get memoryBytes {
     final b = _backend;
@@ -164,16 +172,33 @@ class AppState extends ChangeNotifier {
     speedUp = speedDown = totalUp = totalDown = 0;
     hasTraffic = false;
     final period = Plat.desktop ? 2 : 1;
+    var busy = false;
     _trafficTimer = Timer.periodic(Duration(seconds: period), (_) async {
-      if (state != VpnState.connected) return;
-      final d = await _backend.trafficDelta();
-      if (d == null) return;
-      hasTraffic = true;
-      totalUp += d.up;
-      totalDown += d.down;
-      speedUp = d.up ~/ period;
-      speedDown = d.down ~/ period;
-      notifyListeners();
+      if (state != VpnState.connected || busy) return;
+      busy = true;
+      try {
+        final d = await _backend.trafficDelta();
+        if (d == null) {
+          // Показываем причину на главном экране, если данных так и нет.
+          final err = trafficError;
+          if (err != _shownTrafficError) {
+            _shownTrafficError = err;
+            notifyListeners();
+          }
+          return;
+        }
+        final first = !hasTraffic;
+        hasTraffic = true;
+        _shownTrafficError = null;
+        totalUp += d.up;
+        totalDown += d.down;
+        // Первый ответ на iPhone — итог всей сессии, скорость по нему не считаем.
+        speedUp = first ? 0 : d.up ~/ period;
+        speedDown = first ? 0 : d.down ~/ period;
+        notifyListeners();
+      } finally {
+        busy = false;
+      }
     });
   }
 

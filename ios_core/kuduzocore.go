@@ -10,7 +10,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
+	xlog "github.com/xtls/xray-core/common/log"
 	"github.com/xtls/xray-core/core"
 	"github.com/xtls/xray-core/features/stats"
 	"github.com/xtls/xray-core/infra/conf/serial"
@@ -20,7 +22,41 @@ import (
 var (
 	mu       sync.Mutex
 	instance *core.Instance
+	coreLog  = &ringLog{}
 )
+
+// ringLog — последние строки журнала ядра (предупреждения и ошибки) для экрана «Журнал».
+type ringLog struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (r *ringLog) Handle(msg xlog.Message) {
+	g, ok := msg.(*xlog.GeneralMessage)
+	if !ok || g.Severity > xlog.Severity_Warning {
+		return
+	}
+	r.add(msg.String())
+}
+
+// Severity — ядро не собирает отладочные сообщения, которые всё равно не покажем.
+func (r *ringLog) Severity() xlog.Severity { return xlog.Severity_Warning }
+
+func (r *ringLog) add(s string) {
+	r.mu.Lock()
+	r.lines = append(r.lines, time.Now().Format("15:04:05")+"  "+s)
+	if len(r.lines) > 300 {
+		r.lines = append([]string(nil), r.lines[len(r.lines)-300:]...)
+	}
+	r.mu.Unlock()
+}
+
+// Logs — журнал ядра, строки через перевод строки.
+func Logs() string {
+	coreLog.mu.Lock()
+	defer coreLog.mu.Unlock()
+	return strings.Join(coreLog.lines, "\n")
+}
 
 // SetMemoryLimit задаёт мягкий лимит памяти Go в мегабайтах.
 // Network Extension на iOS завершается системой примерно при 50 МБ.
@@ -49,19 +85,26 @@ func Start(configJSON string, fd int, assetDir string) error {
 	}
 	_ = os.Setenv("xray.tun.fd", strconv.Itoa(fd))
 
+	fail := func(text string) error {
+		coreLog.add("[Error] " + text)
+		return errors.New(text)
+	}
 	cfg, err := serial.LoadJSONConfig(strings.NewReader(configJSON))
 	if err != nil {
-		return errors.New("ошибка конфига: " + err.Error())
+		return fail("ошибка конфига: " + err.Error())
 	}
 	inst, err := core.New(cfg)
 	if err != nil {
-		return errors.New("ошибка ядра: " + err.Error())
+		return fail("ошибка ядра: " + err.Error())
 	}
 	if err := inst.Start(); err != nil {
 		_ = inst.Close()
-		return errors.New("не удалось запустить ядро: " + err.Error())
+		return fail("не удалось запустить ядро: " + err.Error())
 	}
 	instance = inst
+	// Ядро на iPhone пишет журнал в память: stdout расширения никто не видит.
+	xlog.RegisterHandler(coreLog)
+	coreLog.add("[Info] ядро Xray " + core.Version() + " запущено")
 	debug.FreeOSMemory()
 	return nil
 }
@@ -76,6 +119,7 @@ func Stop() error {
 	err := instance.Close()
 	instance = nil
 	debug.FreeOSMemory()
+	coreLog.add("[Info] ядро остановлено")
 	return err
 }
 
@@ -84,7 +128,8 @@ func Version() string {
 	return core.Version()
 }
 
-// QueryTraffic — «отправлено,получено» байт через сервер с прошлого вызова (счётчики обнуляются).
+// QueryTraffic — «отправлено,получено» байт через сервер с момента подключения.
+// Счётчики не обнуляются: если ответ потеряется, итог всё равно будет верным.
 func QueryTraffic() string {
 	mu.Lock()
 	defer mu.Unlock()
@@ -97,10 +142,10 @@ func QueryTraffic() string {
 	}
 	var up, down int64
 	if c := m.GetCounter("outbound>>>proxy>>>traffic>>>uplink"); c != nil {
-		up = c.Set(0)
+		up = c.Value()
 	}
 	if c := m.GetCounter("outbound>>>proxy>>>traffic>>>downlink"); c != nil {
-		down = c.Set(0)
+		down = c.Value()
 	}
 	return strconv.FormatInt(up, 10) + "," + strconv.FormatInt(down, 10)
 }

@@ -68,7 +68,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     completionHandler()
   }
 
-  /// Сообщения от приложения: «stats» → «отправлено,получено,память».
+  /// Сообщения от приложения: «stats» → «отправлено,получено,память», «logs» → журнал ядра.
   override func handleAppMessage(_ messageData: Data, completionHandler: ((Data?) -> Void)?) {
     let command = String(data: messageData, encoding: .utf8) ?? ""
     switch command {
@@ -76,6 +76,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
       let traffic = KuduzocoreQueryTraffic()
       let memory = KuduzocoreMemoryUsage()
       completionHandler?("\(traffic),\(memory)".data(using: .utf8))
+    case "logs":
+      completionHandler?(KuduzocoreLogs().data(using: .utf8))
     default:
       completionHandler?(nil)
     }

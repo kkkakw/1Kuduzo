@@ -224,12 +224,29 @@ class _TrafficCard extends StatelessWidget {
           ]),
         );
 
+    final err = s.hasTraffic ? null : s.trafficError;
     return KCard(
       padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
-      child: Row(children: [
-        col(Icons.arrow_upward_rounded, 'Отправлено', s.totalUp, s.speedUp),
-        Container(width: 1, height: 44, color: K.line),
-        col(Icons.arrow_downward_rounded, 'Получено', s.totalDown, s.speedDown),
+      child: Column(children: [
+        Row(children: [
+          col(Icons.arrow_upward_rounded, 'Отправлено', s.totalUp, s.speedUp),
+          Container(width: 1, height: 44, color: K.line),
+          col(Icons.arrow_downward_rounded, 'Получено', s.totalDown, s.speedDown),
+        ]),
+        AnimatedSize(
+          duration: kMedium,
+          curve: Curves.easeOutCubic,
+          child: err == null
+              ? const SizedBox(width: double.infinity)
+              : Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 10, 10, 0),
+                  child: Text(
+                    'Нет данных: $err',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 11.5, color: K.muted),
+                  ),
+                ),
+        ),
       ]),
     );
   }
