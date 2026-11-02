@@ -1,0 +1,12 @@
+.dart_tool/
+.packages
+build/
+.dl/
+.flutter-plugins
+.flutter-plugins-dependencies
+pubspec.lock
+android/app/libs/
+android/app/src/main/assets/*.dat
+*.iml
+.idea/
+.vscode/
