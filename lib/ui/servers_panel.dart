@@ -17,7 +17,7 @@ class ServersPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = AppScope.of(context);
-    final manual = s.servers.where((x) => x.subscriptionId == null).toList();
+    final manual = s.sorted(s.servers.where((x) => x.subscriptionId == null).toList());
 
     return ListView(
       padding: const EdgeInsets.only(bottom: 32),
@@ -60,7 +60,7 @@ class ServersPanel extends StatelessWidget {
         for (final sub in s.subscriptions) ...[
           _SubHeader(sub: sub),
           const SizedBox(height: 8),
-          _ServerList(servers: s.servers.where((x) => x.subscriptionId == sub.id).toList()),
+          _ServerList(servers: s.sorted(s.servers.where((x) => x.subscriptionId == sub.id).toList())),
           const SizedBox(height: 18),
         ],
         if (manual.isNotEmpty) ...[

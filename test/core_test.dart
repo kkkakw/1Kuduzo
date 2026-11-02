@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kuduzo/core/link_parser.dart';
+import 'package:kuduzo/core/settings.dart';
 import 'package:kuduzo/core/xray_config.dart';
 
 // Тестовые ключи: данные выдуманы, совпадает только формат.
@@ -81,5 +82,47 @@ void main() {
       }
     }
     expect(n, links.length * InboundMode.values.length * RoutingMode.values.length);
+
+    // Все «тяжёлые» настройки сразу.
+    final heavy = AppSettings()
+      ..fragment = true
+      ..fragmentPackets = '1-3'
+      ..noises = true
+      ..mux = true
+      ..ipType = IpType.ipv4
+      ..dns = 'https://1.1.1.1/dns-query, 8.8.8.8'
+      ..allowLan = false
+      ..sniffing = false
+      ..mtu = 1380
+      ..logLevel = 'debug';
+    for (final l in links) {
+      final s = LinkParser.parse(l)!;
+      for (final inb in InboundMode.values) {
+        final cfg = XrayConfigBuilder.build(s, routing: RoutingMode.smart, inbound: inb, settings: heavy);
+        File('${dir.path}/heavy_${s.protocol}_${inb.name}_${n++}.json')
+            .writeAsStringSync(const JsonEncoder.withIndent('  ').convert(cfg));
+      }
+    }
+
+    // Пакетный замер задержки.
+    final all = links.map((l) => LinkParser.parse(l)!).toList();
+    for (final st in [AppSettings(), heavy]) {
+      final cfg = XrayConfigBuilder.forDelayTest(all, 30000, st);
+      File('${dir.path}/delay_${n++}.json').writeAsStringSync(jsonEncode(cfg));
+    }
+  });
+
+  test('настройки сохраняются и читаются', () {
+    final a = AppSettings()
+      ..pingMethod = PingMethod.httpHead
+      ..sort = ServerSort.name
+      ..updateIntervalHours = 6
+      ..userAgent = 'Test/1.0';
+    final b = AppSettings.decode(a.encode());
+    expect(b.pingMethod, PingMethod.httpHead);
+    expect(b.sort, ServerSort.name);
+    expect(b.updateIntervalHours, 6);
+    expect(b.userAgent, 'Test/1.0');
+    expect(AppSettings.decode('мусор').pingMethod, PingMethod.real);
   });
 }

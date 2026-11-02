@@ -76,11 +76,11 @@ class SubscriptionClient {
   /// по заголовку User-Agent. Представляемся так же, как v2rayN.
   static const userAgent = 'v2rayN/7.10.0';
 
-  static Future<void> refresh(Subscription sub, {String? deviceId}) async {
+  static Future<void> refresh(Subscription sub, {String? deviceId, String? agent}) async {
     final http.Response res;
     try {
       res = await http.get(Uri.parse(sub.url), headers: {
-        'User-Agent': userAgent,
+        'User-Agent': (agent == null || agent.isEmpty) ? userAgent : agent,
         'Accept': '*/*',
         if (deviceId != null) 'x-hwid': deviceId,
       }).timeout(const Duration(seconds: 20));

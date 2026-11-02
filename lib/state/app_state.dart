@@ -7,7 +7,9 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/link_parser.dart';
+import '../core/ping.dart';
 import '../core/server.dart';
+import '../core/settings.dart';
 import '../core/subscription.dart';
 import '../core/vpn_backend.dart';
 import '../core/xray_config.dart';
@@ -21,6 +23,9 @@ class AppState extends ChangeNotifier {
   final VpnBackend _backend;
   late SharedPreferences _prefs;
   StreamSubscription<VpnStatus>? _statusSub;
+  Timer? _updateTimer;
+
+  AppSettings settings = AppSettings();
 
   final List<Subscription> subscriptions = [];
   final List<String> _manualLinks = [];
@@ -61,15 +66,75 @@ class AppState extends ChangeNotifier {
     desktopTun = _prefs.getBool('desktopTun') ?? false;
     deviceId = _prefs.getString('deviceId') ?? _newDeviceId();
     await _prefs.setString('deviceId', deviceId);
+    settings = AppSettings.decode(_prefs.getString('settings'));
     _rebuildServers();
 
     _statusSub = _backend.status.listen(_onStatus);
     tunAvailable = await _backend.tunAvailable();
     if (!tunAvailable) desktopTun = false;
     notifyListeners();
+    _scheduleUpdates();
 
-    // Обновляем подписки при запуске и меряем пинг.
-    unawaited(refreshAll(silent: true).then((_) => pingAll()));
+    unawaited(_onLaunch());
+  }
+
+  Future<void> _onLaunch() async {
+    if (settings.updateOnLaunch && subscriptions.isNotEmpty) {
+      await refreshAll(silent: true, ping: false);
+    }
+    if (settings.pingOnLaunch) await pingAll();
+    if (settings.autoConnect && !isOn && servers.isNotEmpty) await connect();
+  }
+
+  void _scheduleUpdates() {
+    _updateTimer?.cancel();
+    if (!settings.autoUpdate) return;
+    final h = settings.updateIntervalHours.clamp(1, 48).toInt();
+    _updateTimer = Timer.periodic(Duration(hours: h), (_) => refreshAll(silent: true));
+  }
+
+  /// Меняет настройки, сохраняет и применяет. Переподключается, если это влияет на туннель.
+  Future<void> updateSettings(void Function(AppSettings s) change, {bool reconnect = false}) async {
+    final oldStartup = settings.launchAtStartup;
+    change(settings);
+    await _prefs.setString('settings', settings.encode());
+    _scheduleUpdates();
+    if (oldStartup != settings.launchAtStartup) await _applyStartup(settings.launchAtStartup);
+    notifyListeners();
+    if (reconnect && isOn) await connect();
+  }
+
+  Future<void> _applyStartup(bool on) async {
+    if (!Platform.isWindows) return;
+    const key = r'HKCU\Software\Microsoft\Windows\CurrentVersion\Run';
+    try {
+      if (on) {
+        await Process.run('reg', ['add', key, '/v', 'Kuduzo', '/t', 'REG_SZ', '/d', '"${Platform.resolvedExecutable}"', '/f']);
+      } else {
+        await Process.run('reg', ['delete', key, '/v', 'Kuduzo', '/f']);
+      }
+    } catch (_) {}
+  }
+
+  List<String> get logs => _backend.logs;
+
+  /// Серверы в порядке, выбранном в настройках.
+  List<ServerConfig> sorted(List<ServerConfig> list) {
+    final l = [...list];
+    switch (settings.sort) {
+      case ServerSort.none:
+        break;
+      case ServerSort.name:
+        l.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+      case ServerSort.ping:
+        int key(ServerConfig s) {
+          final p = pings[s.id];
+          if (p == null || p < 0) return 1 << 30;
+          return p;
+        }
+        l.sort((a, b) => key(a).compareTo(key(b)));
+    }
+    return l;
   }
 
   String _newDeviceId() {
@@ -114,7 +179,8 @@ class AppState extends ChangeNotifier {
       final url = t.split(RegExp(r'\s')).first;
       if (subscriptions.any((s) => s.url == url)) return 'Эта подписка уже добавлена';
       final sub = Subscription(id: _newDeviceId().substring(0, 8), url: url);
-      await SubscriptionClient.refresh(sub, deviceId: deviceId); // бросает SubscriptionException
+      await SubscriptionClient.refresh(sub,
+          deviceId: settings.sendHwid ? deviceId : null, agent: settings.userAgent); // бросает SubscriptionException
       subscriptions.add(sub);
       _rebuildServers();
       await _save();
@@ -138,11 +204,12 @@ class AppState extends ChangeNotifier {
     return added == 0 ? 'Эти ключи уже есть' : 'Добавлено ключей: $added';
   }
 
-  Future<String?> refreshAll({bool silent = false}) async {
+  Future<String?> refreshAll({bool silent = false, bool ping = true}) async {
     String? error;
     for (final sub in subscriptions) {
       try {
-        await SubscriptionClient.refresh(sub, deviceId: deviceId);
+        await SubscriptionClient.refresh(sub,
+            deviceId: settings.sendHwid ? deviceId : null, agent: settings.userAgent);
       } on SubscriptionException catch (e) {
         error = e.message;
       }
@@ -150,6 +217,7 @@ class AppState extends ChangeNotifier {
     _rebuildServers();
     await _save();
     notifyListeners();
+    if (ping && settings.pingAfterUpdate) unawaited(pingAll());
     return error;
   }
 
@@ -237,7 +305,7 @@ class AppState extends ChangeNotifier {
     message = '';
     notifyListeners();
     try {
-      await _backend.start(s, routing, tun: isDesktop ? desktopTun : true);
+      await _backend.start(s, routing, tun: isDesktop ? desktopTun : true, settings: settings);
     } catch (e) {
       state = VpnState.error;
       message = e.toString();
@@ -265,30 +333,20 @@ class AppState extends ChangeNotifier {
 
   // ---------- пинг ----------
 
-  /// TCP-пинг: время установки соединения с сервером.
-  static Future<int> tcpPing(ServerConfig s) async {
-    if (s.protocol == 'hysteria2') return -2; // UDP — TCP-пингом не измерить
-    final sw = Stopwatch()..start();
-    try {
-      final sock = await Socket.connect(s.address, s.port, timeout: const Duration(seconds: 3));
-      sw.stop();
-      sock.destroy();
-      return sw.elapsedMilliseconds;
-    } catch (_) {
-      return -1;
-    }
-  }
-
   Future<void> pingAll() async {
     if (pinging || servers.isEmpty) return;
     pinging = true;
+    pings.clear();
     notifyListeners();
-    await Future.wait(servers.map((s) async {
-      pings[s.id] = await tcpPing(s);
+    try {
+      await Pinger.pingAll(servers, settings, onResult: (id, ms) {
+        pings[id] = ms;
+        notifyListeners();
+      });
+    } finally {
+      pinging = false;
       notifyListeners();
-    }));
-    pinging = false;
-    notifyListeners();
+    }
   }
 
   Future<void> shutdown() async {
@@ -297,6 +355,7 @@ class AppState extends ChangeNotifier {
 
   @override
   void dispose() {
+    _updateTimer?.cancel();
     _statusSub?.cancel();
     super.dispose();
   }

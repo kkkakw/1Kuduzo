@@ -1,4 +1,5 @@
 import 'server.dart';
+import 'settings.dart';
 
 /// Режим маршрутизации.
 enum RoutingMode {
@@ -29,26 +30,29 @@ class XrayConfigBuilder {
     ServerConfig s, {
     required RoutingMode routing,
     required InboundMode inbound,
-    String logLevel = 'warning',
+    AppSettings? settings,
+    bool windows = false,
   }) {
+    final st = settings ?? AppSettings();
     final sniffing = {
-      'enabled': true,
+      'enabled': st.sniffing,
       'destOverride': ['http', 'tls', 'quic'],
-      'routeOnly': true,
+      'routeOnly': st.routeOnly,
+    };
+    final socks = {
+      'tag': 'socks',
+      'listen': '127.0.0.1',
+      'port': socksPort,
+      'protocol': 'socks',
+      'settings': {'udp': true},
+      'sniffing': sniffing,
     };
 
     final inbounds = <Map<String, dynamic>>[];
     switch (inbound) {
       case InboundMode.proxy:
         inbounds.addAll([
-          {
-            'tag': 'socks',
-            'listen': '127.0.0.1',
-            'port': socksPort,
-            'protocol': 'socks',
-            'settings': {'udp': true},
-            'sniffing': sniffing,
-          },
+          socks,
           {
             'tag': 'http',
             'listen': '127.0.0.1',
@@ -61,7 +65,7 @@ class XrayConfigBuilder {
         inbounds.add({
           'tag': 'tun',
           'protocol': 'tun',
-          'settings': {'name': 'xray0', 'mtu': 1500},
+          'settings': {'name': 'xray0', 'mtu': st.mtu},
           'sniffing': sniffing,
         });
       case InboundMode.tunDesktop:
@@ -70,22 +74,16 @@ class XrayConfigBuilder {
           'protocol': 'tun',
           'settings': {
             'name': 'Kuduzo',
-            'mtu': 1500,
+            'mtu': st.mtu,
             'gateway': ['172.19.0.1/30'],
-            'dns': ['1.1.1.1'],
+            'dns': [_tunDns(st)],
             'autoSystemRoutingTable': ['0.0.0.0/0', '::/0'],
+            if (windows && st.leakProtection) 'autoSystemWfpBlockLeak': ['dns'],
           },
           'sniffing': sniffing,
         });
         // Локальный прокси тоже оставляем — удобно для отладки и браузерных расширений.
-        inbounds.add({
-          'tag': 'socks',
-          'listen': '127.0.0.1',
-          'port': socksPort,
-          'protocol': 'socks',
-          'settings': {'udp': true},
-          'sniffing': sniffing,
-        });
+        inbounds.add(socks);
     }
 
     final rules = <Map<String, dynamic>>[
@@ -96,11 +94,12 @@ class XrayConfigBuilder {
           'port': '53',
           'outboundTag': 'dns-out',
         },
-      {
-        'type': 'field',
-        'ip': ['geoip:private'],
-        'outboundTag': 'direct',
-      },
+      if (st.allowLan)
+        {
+          'type': 'field',
+          'ip': ['geoip:private'],
+          'outboundTag': 'direct',
+        },
       if (routing == RoutingMode.smart) ...[
         {
           'type': 'field',
@@ -116,16 +115,20 @@ class XrayConfigBuilder {
     ];
 
     return {
-      'log': {'loglevel': logLevel},
-      'dns': {
-        'servers': ['1.1.1.1', '8.8.8.8'],
-      },
+      'log': {'loglevel': st.logLevel},
+      'dns': _dns(st),
+      'policy': _policy(st),
       'inbounds': inbounds,
       'outbounds': [
-        outbound(s),
-        {'tag': 'direct', 'protocol': 'freedom'},
+        outbound(s, settings: st),
+        {
+          'tag': 'direct',
+          'protocol': 'freedom',
+          'settings': {'domainStrategy': _freedomStrategy(st)},
+        },
         {'tag': 'block', 'protocol': 'blackhole'},
         {'tag': 'dns-out', 'protocol': 'dns'},
+        if (_dialer(s, st) != null) _dialer(s, st)!,
       ],
       'routing': {
         'domainStrategy': 'IPIfNonMatch',
@@ -134,14 +137,107 @@ class XrayConfigBuilder {
     };
   }
 
-  /// Конфиг только для замера задержки: один SOCKS-вход и исходящий на сервер.
-  static Map<String, dynamic> forDelayTest(ServerConfig s) => {
-        'log': {'loglevel': 'none'},
-        'inbounds': <Map<String, dynamic>>[],
-        'outbounds': [outbound(s)],
+  /// Один процесс Xray для замера задержки сразу у многих серверов:
+  /// i-й HTTP-вход на порту basePort+i ведёт на i-й сервер.
+  static Map<String, dynamic> forDelayTest(List<ServerConfig> servers, int basePort, AppSettings st) {
+    final inbounds = <Map<String, dynamic>>[];
+    final outbounds = <Map<String, dynamic>>[];
+    final rules = <Map<String, dynamic>>[];
+    var needDialer = false;
+    for (var i = 0; i < servers.length; i++) {
+      inbounds.add({'tag': 'in$i', 'listen': '127.0.0.1', 'port': basePort + i, 'protocol': 'http'});
+      outbounds.add(outbound(servers[i], tag: 'out$i', settings: st));
+      rules.add({'type': 'field', 'inboundTag': ['in$i'], 'outboundTag': 'out$i'});
+      if (_dialer(servers[i], st) != null) needDialer = true;
+    }
+    if (needDialer) outbounds.add(_dialerOutbound(st));
+    return {
+      'log': {'loglevel': 'none'},
+      'dns': _dns(st),
+      'inbounds': inbounds,
+      'outbounds': outbounds,
+      'routing': {'rules': rules},
+    };
+  }
+
+  static String _tunDns(AppSettings st) {
+    for (final d in st.dnsServers) {
+      if (RegExp(r'^[0-9.]+$').hasMatch(d) || (d.contains(':') && !d.contains('/'))) return d;
+    }
+    return '1.1.1.1';
+  }
+
+  static Map<String, dynamic> _dns(AppSettings st) => {
+        'servers': [...st.dnsServers, if (!st.dnsServers.contains('8.8.8.8')) '8.8.8.8'],
+        'queryStrategy': switch (st.ipType) {
+          IpType.auto => 'UseIP',
+          IpType.ipv4 => 'UseIPv4',
+          IpType.ipv6 => 'UseIPv6',
+        },
       };
 
-  static Map<String, dynamic> outbound(ServerConfig s) {
+  static String _freedomStrategy(AppSettings st) => switch (st.ipType) {
+        IpType.auto => 'AsIs',
+        IpType.ipv4 => 'UseIPv4',
+        IpType.ipv6 => 'UseIPv6',
+      };
+
+  static Map<String, dynamic> _policy(AppSettings st) => {
+        'levels': {
+          '0': {'connIdle': st.connIdle},
+        },
+      };
+
+  static bool _tlsLike(ServerConfig s) =>
+      s.protocol != 'hysteria2' && (s.security == 'tls' || s.security == 'reality');
+
+  /// Нужен ли промежуточный freedom-выход для фрагментации/шума.
+  static Map<String, dynamic>? _dialer(ServerConfig s, AppSettings st) {
+    final frag = st.fragment && _tlsLike(s);
+    if (!frag && !st.noises) return null;
+    return _dialerOutbound(st);
+  }
+
+  static Map<String, dynamic> _dialerOutbound(AppSettings st) => {
+        'tag': 'fragment',
+        'protocol': 'freedom',
+        'settings': {
+          'domainStrategy': _freedomStrategy(st),
+          if (st.fragment)
+            'fragment': {
+              'packets': st.fragmentPackets,
+              'length': st.fragmentLength,
+              'interval': st.fragmentInterval,
+            },
+          if (st.noises)
+            'noises': [
+              {'type': 'rand', 'packet': '10-20', 'delay': '10-16'},
+            ],
+        },
+      };
+
+  /// Исходящее соединение к серверу с учётом Mux и фрагментации.
+  static Map<String, dynamic> outbound(ServerConfig s, {String tag = 'proxy', AppSettings? settings}) {
+    final st = settings ?? AppSettings();
+    final o = _outboundBase(s);
+    o['tag'] = tag;
+    final muxOk = st.mux &&
+        s.flow.isEmpty &&
+        s.network != 'xhttp' &&
+        s.protocol != 'hysteria2' &&
+        s.protocol != 'shadowsocks';
+    if (muxOk) {
+      o['mux'] = {'enabled': true, 'concurrency': st.muxConcurrency};
+    }
+    if (_dialer(s, st) != null) {
+      final stream = Map<String, dynamic>.from((o['streamSettings'] as Map?) ?? const {});
+      stream['sockopt'] = {'dialerProxy': 'fragment'};
+      o['streamSettings'] = stream;
+    }
+    return o;
+  }
+
+  static Map<String, dynamic> _outboundBase(ServerConfig s) {
     switch (s.protocol) {
       case 'vless':
         return {

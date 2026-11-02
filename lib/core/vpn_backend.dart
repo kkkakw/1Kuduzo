@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'server.dart';
+import 'settings.dart';
 import 'system_proxy.dart';
 import 'xray_config.dart';
 
@@ -24,9 +25,12 @@ abstract class VpnBackend {
   /// Поддерживается ли режим «весь трафик» через TUN.
   Future<bool> tunAvailable();
 
-  Future<void> start(ServerConfig server, RoutingMode routing, {required bool tun});
+  Future<void> start(ServerConfig server, RoutingMode routing, {required bool tun, AppSettings? settings});
 
   Future<void> stop();
+
+  /// Последние строки журнала ядра (только компьютер).
+  List<String> get logs => const [];
 
   static VpnBackend create() {
     if (Platform.isAndroid || Platform.isIOS) return MobileVpnBackend();
@@ -66,13 +70,14 @@ class MobileVpnBackend implements VpnBackend {
   Future<bool> tunAvailable() async => true;
 
   @override
-  Future<void> start(ServerConfig server, RoutingMode routing, {required bool tun}) async {
+  Future<void> start(ServerConfig server, RoutingMode routing, {required bool tun, AppSettings? settings}) async {
     final allowed = await _ch.invokeMethod<bool>('prepare') ?? false;
     if (!allowed) {
       _ctrl.add(const VpnStatus(VpnState.error, 'Нужно разрешить подключение VPN'));
       return;
     }
-    final config = XrayConfigBuilder.build(server, routing: routing, inbound: InboundMode.tunMobile);
+    final config =
+        XrayConfigBuilder.build(server, routing: routing, inbound: InboundMode.tunMobile, settings: settings);
     _ctrl.add(const VpnStatus(VpnState.connecting));
     await _ch.invokeMethod('start', {'config': jsonEncode(config), 'name': server.name});
   }
@@ -81,6 +86,9 @@ class MobileVpnBackend implements VpnBackend {
   Future<void> stop() async {
     await _ch.invokeMethod('stop');
   }
+
+  @override
+  List<String> get logs => const [];
 
   void dispose() => _sub?.cancel();
 }
@@ -91,6 +99,28 @@ class DesktopVpnBackend implements VpnBackend {
   Process? _proc;
   bool _proxySet = false;
   bool _stopping = false;
+  final List<String> _logs = [];
+
+  @override
+  List<String> get logs => List.unmodifiable(_logs);
+
+  void _log(String line) {
+    final t = DateTime.now();
+    String two(int n) => n.toString().padLeft(2, '0');
+    _logs.add('${two(t.hour)}:${two(t.minute)}:${two(t.second)}  $line');
+    if (_logs.length > 400) _logs.removeRange(0, _logs.length - 400);
+  }
+
+  /// Версия ядра (первая строка `xray version`).
+  static Future<String> coreVersion() async {
+    try {
+      final r = await Process.run(xrayPath(), ['version']);
+      final line = r.stdout.toString().split('\n').first.trim();
+      return line.isEmpty ? 'неизвестно' : line;
+    } catch (_) {
+      return 'не найдено';
+    }
+  }
 
   @override
   Stream<VpnStatus> get status => _ctrl.stream;
@@ -120,19 +150,26 @@ class DesktopVpnBackend implements VpnBackend {
   }
 
   @override
-  Future<void> start(ServerConfig server, RoutingMode routing, {required bool tun}) async {
+  Future<void> start(ServerConfig server, RoutingMode routing, {required bool tun, AppSettings? settings}) async {
     await stop();
     _stopping = false;
     _ctrl.add(const VpnStatus(VpnState.connecting));
 
     final xray = xrayPath();
     if (!File(xray).existsSync()) {
-      _ctrl.add(VpnStatus(VpnState.error, 'Не найдено ядро Xray: $xray'));
+      final p = xray.toLowerCase();
+      final fromArchive = p.contains('rartemp') || p.contains(r'\temp\') || p.contains('7zo');
+      _ctrl.add(VpnStatus(
+          VpnState.error,
+          fromArchive
+              ? 'Программа запущена прямо из архива. Распакуйте архив целиком (например, на Рабочий стол) и запустите kuduzo.exe из распакованной папки'
+              : 'Не найдено ядро Xray: $xray. Рядом с kuduzo.exe должна быть папка xray'));
       return;
     }
 
     final inbound = tun ? InboundMode.tunDesktop : InboundMode.proxy;
-    final config = XrayConfigBuilder.build(server, routing: routing, inbound: inbound);
+    final config = XrayConfigBuilder.build(server,
+        routing: routing, inbound: inbound, settings: settings, windows: Platform.isWindows);
     final dir = await getApplicationSupportDirectory();
     final cfgFile = File('${dir.path}${Platform.pathSeparator}config.json');
     await cfgFile.writeAsString(jsonEncode(config));
@@ -150,9 +187,11 @@ class DesktopVpnBackend implements VpnBackend {
     }
 
     final errLines = <String>[];
+    _log('— запуск: ${server.name} (${tun ? 'TUN' : 'системный прокси'})');
     void collect(String line) {
       errLines.add(line);
       if (errLines.length > 20) errLines.removeAt(0);
+      _log(line);
     }
 
     _proc!.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen(collect);
