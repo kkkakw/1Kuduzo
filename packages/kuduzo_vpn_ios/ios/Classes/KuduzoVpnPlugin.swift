@@ -47,13 +47,13 @@ public class KuduzoVpnPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
     case "prepare":
       loadManager { [weak self] m, error in
         guard let self = self, let m = m, error == nil else {
-          DispatchQueue.main.async { result(false) }
+          DispatchQueue.main.async { result(Self.flutterError(error)) }
           return
         }
-        self.configure(m, config: nil) { err in
+        self.configure(m, config: nil, options: nil) { err in
           DispatchQueue.main.async {
-            if err != nil {
-              result(false)
+            if let err = err {
+              result(Self.flutterError(err))
             } else {
               self.manager = m
               self.observe(m)
@@ -61,6 +61,35 @@ public class KuduzoVpnPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
             }
           }
         }
+      }
+
+    case "configure":
+      let args = call.arguments as? [String: Any] ?? [:]
+      loadManager { [weak self] m, _ in
+        guard let self = self, let m = m else {
+          DispatchQueue.main.async { result(nil) }
+          return
+        }
+        self.configure(m, config: nil, options: args) { _ in
+          DispatchQueue.main.async { result(nil) }
+        }
+      }
+
+    case "stats":
+      guard let session = manager?.connection as? NETunnelProviderSession,
+            session.status == .connected,
+            let data = "stats".data(using: .utf8) else {
+        result(nil)
+        return
+      }
+      do {
+        try session.sendProviderMessage(data) { reply in
+          DispatchQueue.main.async {
+            result(reply.flatMap { String(data: $0, encoding: .utf8) })
+          }
+        }
+      } catch {
+        result(nil)
       }
 
     case "start":
@@ -73,7 +102,7 @@ public class KuduzoVpnPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
           DispatchQueue.main.async { result(nil) }
           return
         }
-        self.configure(m, config: config) { err in
+        self.configure(m, config: config, options: args) { err in
           DispatchQueue.main.async {
             if let err = err {
               self.emit("error:" + err.localizedDescription)
@@ -95,14 +124,27 @@ public class KuduzoVpnPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
 
     case "stop":
       wasConnecting = false
-      if let m = manager {
-        m.connection.stopVPNTunnel()
-        result(nil)
-      } else {
-        loadManager { m, _ in
-          m?.connection.stopVPNTunnel()
+      // Ручное выключение: временно гасим On Demand, иначе iOS сразу подключит VPN снова.
+      func stopIt(_ m: NETunnelProviderManager?) {
+        guard let m = m else {
+          DispatchQueue.main.async { result(nil) }
+          return
+        }
+        if m.isOnDemandEnabled {
+          m.isOnDemandEnabled = false
+          m.saveToPreferences { _ in
+            m.connection.stopVPNTunnel()
+            DispatchQueue.main.async { result(nil) }
+          }
+        } else {
+          m.connection.stopVPNTunnel()
           DispatchQueue.main.async { result(nil) }
         }
+      }
+      if let m = manager {
+        stopIt(m)
+      } else {
+        loadManager { m, _ in stopIt(m) }
       }
 
     default:
@@ -123,14 +165,37 @@ public class KuduzoVpnPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
     }
   }
 
-  private func configure(_ m: NETunnelProviderManager, config: String?, _ done: @escaping (Error?) -> Void) {
+  private static let tunnelKeys = [
+    "dns", "mtu", "excludedRoutes", "includedRoutes", "memoryLimit", "allowLan",
+    "includeAllNetworks", "disconnectOnSleep",
+  ]
+
+  private func configure(
+    _ m: NETunnelProviderManager, config: String?, options: [String: Any]?,
+    _ done: @escaping (Error?) -> Void
+  ) {
     let proto = (m.protocolConfiguration as? NETunnelProviderProtocol) ?? NETunnelProviderProtocol()
     proto.providerBundleIdentifier = KuduzoVpnPlugin.extensionId
     proto.serverAddress = "Kuduzo VPN"
+    var stored = proto.providerConfiguration ?? [:]
     if let config = config, !config.isEmpty {
-      // Сохраняем конфиг, чтобы VPN можно было включить и из «Настроек» iOS.
-      proto.providerConfiguration = ["config": config]
+      // Сохраняем конфиг, чтобы VPN можно было включить и из «Настроек» iOS или по On Demand.
+      stored["config"] = config
     }
+    if let o = options {
+      for key in Self.tunnelKeys {
+        if let v = o[key] { stored[key] = v }
+      }
+      if #available(iOS 14.0, *) {
+        proto.includeAllNetworks = o["includeAllNetworks"] as? Bool ?? false
+      }
+      if #available(iOS 14.2, *) {
+        proto.excludeLocalNetworks = o["allowLan"] as? Bool ?? true
+      }
+      proto.disconnectOnSleep = o["disconnectOnSleep"] as? Bool ?? false
+      applyOnDemand(m, o)
+    }
+    proto.providerConfiguration = stored
     m.protocolConfiguration = proto
     m.localizedDescription = "Kuduzo VPN"
     m.isEnabled = true
@@ -141,6 +206,38 @@ public class KuduzoVpnPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
       }
       m.loadFromPreferences { done($0) }
     }
+  }
+
+  /// Правила On Demand: подключаться в Wi‑Fi / мобильной сети, кроме указанных Wi‑Fi сетей.
+  private func applyOnDemand(_ m: NETunnelProviderManager, _ o: [String: Any]) {
+    let enabled = o["onDemand"] as? Bool ?? false
+    guard enabled else {
+      m.isOnDemandEnabled = false
+      m.onDemandRules = nil
+      return
+    }
+    var rules: [NEOnDemandRule] = []
+    let excluded = (o["onDemandExcludedSsids"] as? [String] ?? []).filter { !$0.isEmpty }
+    if !excluded.isEmpty {
+      let r = NEOnDemandRuleDisconnect()
+      r.interfaceTypeMatch = .wiFi
+      r.ssidMatch = excluded
+      rules.append(r)
+    }
+    let wifi: NEOnDemandRule = (o["onDemandWifi"] as? Bool ?? true) ? NEOnDemandRuleConnect() : NEOnDemandRuleIgnore()
+    wifi.interfaceTypeMatch = .wiFi
+    rules.append(wifi)
+    let cell: NEOnDemandRule = (o["onDemandCellular"] as? Bool ?? true) ? NEOnDemandRuleConnect() : NEOnDemandRuleIgnore()
+    cell.interfaceTypeMatch = .cellular
+    rules.append(cell)
+    m.onDemandRules = rules
+    m.isOnDemandEnabled = true
+  }
+
+  private static func flutterError(_ error: Error?) -> FlutterError {
+    let ns = error as NSError?
+    let text = ns.map { "\($0.domain) \($0.code): \($0.localizedDescription)" } ?? "нет ответа от системы"
+    return FlutterError(code: "vpn_prepare", message: text, details: nil)
   }
 
   private func observe(_ m: NETunnelProviderManager) {

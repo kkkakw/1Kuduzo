@@ -95,7 +95,21 @@ void main() {
       ..allowLan = false
       ..sniffing = false
       ..mtu = 1380
-      ..logLevel = 'debug';
+      ..logLevel = 'debug'
+      ..routingEnabled = true
+      ..directSites = ['example.ru', 'geosite:category-ru', '*.local.test']
+      ..directIps = ['192.168.0.0/16', 'geoip:ru']
+      ..proxySites = ['https://youtube.com/watch', 'full:instagram.com']
+      ..proxyIps = ['8.8.8.8/32']
+      ..blockSites = ['keyword:ads']
+      ..blockIps = ['1.2.3.4']
+      ..socksAuth = true
+      ..socksPass = 'secret'
+      ..socksPort = 20808
+      ..httpPort = 20809
+      ..mobileLocalProxy = true
+      ..excludedRoutes = ['17.0.0.0/8']
+      ..includedRoutes = ['0.0.0.0/1', '128.0.0.0/1'];
     for (final l in links) {
       final s = LinkParser.parse(l)!;
       for (final inb in InboundMode.values) {
@@ -130,17 +144,41 @@ void main() {
     expect(r.down, 2000);
   });
 
+  test('свои правила маршрутизации', () {
+    expect(XrayConfigBuilder.domainRule('https://youtube.com/watch'), 'domain:youtube.com');
+    expect(XrayConfigBuilder.domainRule('*.example.com'), 'domain:example.com');
+    expect(XrayConfigBuilder.domainRule('geosite:google'), 'geosite:google');
+    final st = AppSettings()
+      ..routingEnabled = true
+      ..blockSites = ['ads.com']
+      ..proxyIps = ['8.8.8.8'];
+    final r = XrayConfigBuilder.customRules(st);
+    expect(r.first['outboundTag'], 'block');
+    expect(r.last['outboundTag'], 'proxy');
+    final happ = AppSettings();
+    expect(happ.importRouting({'Name': 'RU', 'DirectSites': ['geosite:ru'], 'BlockIp': ['1.1.1.1']}), isTrue);
+    expect(happ.routingName, 'RU');
+    expect(happ.directSites, ['geosite:ru']);
+    expect(happ.importRouting({'foo': 1}), isFalse);
+  });
+
   test('настройки сохраняются и читаются', () {
     final a = AppSettings()
       ..pingMethod = PingMethod.httpHead
       ..sort = ServerSort.name
       ..updateIntervalHours = 6
-      ..userAgent = 'Test/1.0';
+      ..userAgent = 'Test/1.0'
+      ..theme = ThemePref.dark
+      ..pingView = PingView.both
+      ..onDemandExcludedSsids = ['Home'];
     final b = AppSettings.decode(a.encode());
     expect(b.pingMethod, PingMethod.httpHead);
     expect(b.sort, ServerSort.name);
     expect(b.updateIntervalHours, 6);
     expect(b.userAgent, 'Test/1.0');
+    expect(b.theme, ThemePref.dark);
+    expect(b.pingView, PingView.both);
+    expect(b.onDemandExcludedSsids, ['Home']);
     expect(AppSettings.decode('мусор').pingMethod, PingMethod.real);
   });
 }

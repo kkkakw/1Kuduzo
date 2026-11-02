@@ -46,25 +46,32 @@ class XrayConfigBuilder {
     final socks = {
       'tag': 'socks',
       'listen': '127.0.0.1',
-      'port': socksPort,
+      'port': st.socksPort,
       'protocol': 'socks',
-      'settings': {'udp': true},
+      'settings': <String, dynamic>{
+        'udp': true,
+        if (st.socksAuth && st.socksPass.isNotEmpty) ...{
+          'auth': 'password',
+          'accounts': [
+            {'user': st.socksUser, 'pass': st.socksPass}
+          ],
+        },
+      },
+      'sniffing': sniffing,
+    };
+    final http = {
+      'tag': 'http',
+      'listen': '127.0.0.1',
+      'port': st.httpPort,
+      'protocol': 'http',
       'sniffing': sniffing,
     };
 
     final inbounds = <Map<String, dynamic>>[];
     switch (inbound) {
       case InboundMode.proxy:
-        inbounds.addAll([
-          socks,
-          {
-            'tag': 'http',
-            'listen': '127.0.0.1',
-            'port': httpPort,
-            'protocol': 'http',
-            'sniffing': sniffing,
-          },
-        ]);
+        // HTTP-вход нужен всегда: через него работает системный прокси.
+        inbounds.addAll([socks, http]);
       case InboundMode.tunMobile:
         inbounds.add({
           'tag': 'tun',
@@ -72,6 +79,11 @@ class XrayConfigBuilder {
           'settings': {'name': 'xray0', 'mtu': st.mtu},
           'sniffing': sniffing,
         });
+        // По желанию — локальный прокси для других приложений на телефоне.
+        if (st.mobileLocalProxy) {
+          inbounds.add(socks);
+          if (st.httpInbound) inbounds.add(http);
+        }
       case InboundMode.tunDesktop:
         inbounds.add({
           'tag': 'tun',
@@ -81,13 +93,14 @@ class XrayConfigBuilder {
             'mtu': st.mtu,
             'gateway': ['172.19.0.1/30'],
             'dns': [_tunDns(st)],
-            'autoSystemRoutingTable': ['0.0.0.0/0', '::/0'],
+            'autoSystemRoutingTable': st.includedRoutes.isNotEmpty ? st.includedRoutes : ['0.0.0.0/0', '::/0'],
             if (windows && st.leakProtection) 'autoSystemWfpBlockLeak': ['dns'],
           },
           'sniffing': sniffing,
         });
         // Локальный прокси тоже оставляем — удобно для отладки и браузерных расширений.
         inbounds.add(socks);
+        if (st.httpInbound) inbounds.add(http);
     }
 
     final rules = <Map<String, dynamic>>[
@@ -98,12 +111,19 @@ class XrayConfigBuilder {
           'port': '53',
           'outboundTag': 'dns-out',
         },
+      if (inbound == InboundMode.tunDesktop && st.excludedRoutes.isNotEmpty)
+        {
+          'type': 'field',
+          'ip': st.excludedRoutes,
+          'outboundTag': 'direct',
+        },
       if (st.allowLan)
         {
           'type': 'field',
           'ip': ['geoip:private'],
           'outboundTag': 'direct',
         },
+      ...customRules(st, lite: lite),
       if (routing == RoutingMode.smart) ...[
         {
           'type': 'field',
@@ -151,6 +171,35 @@ class XrayConfigBuilder {
     };
   }
 
+  /// Свои правила маршрутизации: блокировать → через VPN → напрямую (порядок важен).
+  static List<Map<String, dynamic>> customRules(AppSettings st, {bool lite = false}) {
+    if (!st.routingEnabled) return const [];
+    final out = <Map<String, dynamic>>[];
+    void add(List<String> sites, List<String> ips, String tag) {
+      final d = sites.map(domainRule).where((x) => x.isNotEmpty && !(lite && x.startsWith('geosite:'))).toList();
+      final i = ips.map((x) => x.trim()).where((x) => x.isNotEmpty).toList();
+      if (d.isNotEmpty) out.add({'type': 'field', 'domain': d, 'outboundTag': tag});
+      if (i.isNotEmpty) out.add({'type': 'field', 'ip': i, 'outboundTag': tag});
+    }
+
+    add(st.blockSites, st.blockIps, 'block');
+    add(st.proxySites, st.proxyIps, 'proxy');
+    add(st.directSites, st.directIps, 'direct');
+    return out;
+  }
+
+  /// «youtube.com» → «domain:youtube.com»; префиксы Xray (geosite:, full:, regexp:…) оставляем как есть.
+  static String domainRule(String raw) {
+    final x = raw.trim();
+    if (x.isEmpty) return '';
+    if (RegExp(r'^(geosite|domain|full|regexp|keyword|ext):', caseSensitive: false).hasMatch(x)) return x;
+    var d = x.toLowerCase();
+    d = d.replaceFirst(RegExp(r'^https?://'), '');
+    d = d.split('/').first;
+    d = d.replaceFirst(RegExp(r'^\*\.'), '').replaceFirst(RegExp(r'^\.'), '');
+    return d.isEmpty ? '' : 'domain:$d';
+  }
+
   /// Один процесс Xray для замера задержки сразу у многих серверов:
   /// i-й HTTP-вход на порту basePort+i ведёт на i-й сервер.
   static Map<String, dynamic> forDelayTest(List<ServerConfig> servers, int basePort, AppSettings st) {
@@ -173,6 +222,9 @@ class XrayConfigBuilder {
       'routing': {'rules': rules},
     };
   }
+
+  /// DNS-сервер для системного туннеля (только IP-адрес).
+  static String tunnelDns(AppSettings st) => _tunDns(st);
 
   static String _tunDns(AppSettings st) {
     for (final d in st.dnsServers) {

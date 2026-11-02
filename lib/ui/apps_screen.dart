@@ -87,7 +87,7 @@ class _AppsScreenState extends State<AppsScreen> {
           child: error != null
               ? Center(child: Text('Не удалось получить список: $error', textAlign: TextAlign.center))
               : apps == null
-                  ? const Center(child: CircularProgressIndicator(color: K.ink))
+                  ? Center(child: CircularProgressIndicator(color: K.ink))
                   : ListView.builder(
                       itemCount: list.length,
                       itemBuilder: (_, i) {

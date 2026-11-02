@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.IpPrefix
 import android.net.VpnService
 import android.os.Build
 import android.os.Handler
@@ -16,6 +17,9 @@ import io.flutter.plugin.common.EventChannel
 import libv2ray.CoreCallbackHandler
 import libv2ray.CoreController
 import libv2ray.Libv2ray
+import org.json.JSONArray
+import org.json.JSONObject
+import java.net.InetAddress
 
 /**
  * Системный VPN: Android отдаёт TUN-дескриптор, Xray-core (libv2ray.aar) читает из него пакеты
@@ -70,31 +74,80 @@ class KuduzoVpnService : VpnService() {
                 val name = intent.getStringExtra("name") ?: "Kuduzo"
                 val splitMode = intent.getStringExtra("splitMode") ?: "all"
                 val splitApps = intent.getStringArrayListExtra("splitApps") ?: arrayListOf()
+                val tunnel = try { JSONObject(intent.getStringExtra("tunnel") ?: "{}") } catch (_: Exception) { JSONObject() }
                 showNotification(name)
                 current = this
-                Thread { startVpn(config, splitMode, splitApps) }.start()
+                Thread { startVpn(config, splitMode, splitApps, tunnel) }.start()
             }
         }
         return START_NOT_STICKY
     }
 
-    private fun startVpn(config: String, splitMode: String, splitApps: List<String>) {
+    private fun JSONArray?.strings(): List<String> {
+        if (this == null) return emptyList()
+        return (0 until length()).map { optString(it).trim() }.filter { it.isNotEmpty() }
+    }
+
+    /// «10.0.0.0/8» → (адрес, длина префикса).
+    private fun cidr(s: String): Pair<String, Int>? {
+        val p = s.trim().split("/")
+        val a = p[0].trim()
+        if (a.isEmpty()) return null
+        val def = if (a.contains(":")) 128 else 32
+        return a to (p.getOrNull(1)?.trim()?.toIntOrNull() ?: def)
+    }
+
+    private fun startVpn(config: String, splitMode: String, splitApps: List<String>, tunnel: JSONObject) {
         synchronized(lock) {
             stopCore()
             emit("connecting")
             try {
                 Libv2ray.initCoreEnv(filesDir.absolutePath, "")
 
+                val mtu = tunnel.optInt("mtu", 1500)
+                val dns = tunnel.optString("dns", "1.1.1.1").ifEmpty { "1.1.1.1" }
+                val included = tunnel.optJSONArray("includedRoutes").strings().mapNotNull { cidr(it) }
+                val excluded = tunnel.optJSONArray("excludedRoutes").strings().mapNotNull { cidr(it) }
+
                 val builder = Builder()
                     .setSession("Kuduzo")
-                    .setMtu(1500)
-                    .addAddress("10.10.14.1", 30)
-                    .addRoute("0.0.0.0", 0)
-                    .addDnsServer("1.1.1.1")
+                    .setMtu(mtu)
+                    .addAddress("198.18.0.1", 30)
                 try {
-                    builder.addAddress("fd66:6b75:6475::1", 126).addRoute("::", 0)
+                    builder.addDnsServer(dns)
+                } catch (e: Exception) {
+                    builder.addDnsServer("1.1.1.1")
+                }
+                val in4 = included.filter { !it.first.contains(":") }
+                val in6 = included.filter { it.first.contains(":") }
+                if (included.isEmpty()) {
+                    builder.addRoute("0.0.0.0", 0)
+                } else {
+                    for ((a, l) in in4) {
+                        try { builder.addRoute(a, l) } catch (e: Exception) { Log.w(TAG, "маршрут $a/$l: ${e.message}") }
+                    }
+                }
+                try {
+                    builder.addAddress("fd66:6b75:6475::1", 126)
+                    if (included.isEmpty()) {
+                        builder.addRoute("::", 0)
+                    } else {
+                        for ((a, l) in in6) {
+                            try { builder.addRoute(a, l) } catch (e: Exception) { Log.w(TAG, "маршрут $a/$l: ${e.message}") }
+                        }
+                    }
                 } catch (e: Exception) {
                     Log.w(TAG, "IPv6 недоступен: ${e.message}")
+                }
+                // Исключённые маршруты (Android 13+).
+                if (Build.VERSION.SDK_INT >= 33) {
+                    for ((a, l) in excluded) {
+                        try {
+                            builder.excludeRoute(IpPrefix(InetAddress.getByName(a), l))
+                        } catch (e: Exception) {
+                            Log.w(TAG, "исключение $a/$l: ${e.message}")
+                        }
+                    }
                 }
                 // Раздельное туннелирование. Своё приложение всегда мимо VPN — иначе ядро зациклится.
                 val chosen = splitApps.filter { it != packageName }

@@ -2,6 +2,8 @@ import 'dart:ui' show FontFeature;
 
 import 'package:flutter/material.dart';
 
+import '../core/platform.dart';
+import '../core/settings.dart';
 import '../core/vpn_backend.dart';
 import '../core/xray_config.dart';
 import '../state/app_state.dart';
@@ -9,12 +11,21 @@ import '../theme.dart';
 import '../version.dart';
 import 'widgets.dart';
 
-/// Главный экран: заголовок, тумблер, статус, текущий сервер, режимы.
+/// Главный экран: заголовок, тумблер, статус, трафик, текущий сервер, режимы.
 class HomePanel extends StatelessWidget {
   const HomePanel({super.key, required this.onOpenServers, this.wide = false});
 
   final VoidCallback onOpenServers;
   final bool wide;
+
+  static double toggleWidth(AppSettings st, bool wide) {
+    final base = wide ? 340.0 : 300.0;
+    return switch (st.buttonSize) {
+      UiSize.small => base * 0.82,
+      UiSize.normal => base,
+      UiSize.large => base * 1.12,
+    };
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -26,7 +37,7 @@ class HomePanel extends StatelessWidget {
         ? K.accent
         : s.state == VpnState.error
             ? K.bad
-            : const Color(0xFFA8A39D);
+            : K.dotOff;
 
     final exp = s.expiring;
     return Column(
@@ -47,14 +58,14 @@ class HomePanel extends StatelessWidget {
                     ? 'Подписка «${exp.sub.displayTitle}» заканчивается сегодня'
                     : 'Подписка «${exp.sub.displayTitle}» закончится через ${exp.days} дн.',
           ),
-        SizedBox(height: wide ? 12 : 28),
+        SizedBox(height: wide ? 12 : 24),
         _Headline(on: connected, size: wide ? 40 : 34),
-        SizedBox(height: wide ? 40 : 34),
+        SizedBox(height: wide ? 40 : 32),
         Center(
           child: KToggle(
             on: s.isOn,
             busy: busy,
-            width: wide ? 340 : 300,
+            width: toggleWidth(s.settings, wide),
             onTap: () async {
               await s.toggle();
             },
@@ -64,7 +75,8 @@ class HomePanel extends StatelessWidget {
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Container(
+            AnimatedContainer(
+              duration: kMedium,
               width: 12,
               height: 12,
               decoration: BoxDecoration(
@@ -75,42 +87,62 @@ class HomePanel extends StatelessWidget {
             ),
             const SizedBox(width: 10),
             Flexible(
-              child: Text(statusText(s),
+              child: AnimatedSwitcher(
+                duration: kFast,
+                child: Text(
+                  statusText(s),
+                  key: ValueKey(statusText(s)),
                   textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 17, color: K.text2)),
+                  style: TextStyle(fontSize: 17, color: K.text2),
+                ),
+              ),
             ),
           ],
         ),
         const SizedBox(height: 6),
         Center(
-          child: connected && s.connectedAt != null
-              ? ElapsedText(
-                  since: s.connectedAt!,
-                  style: const TextStyle(
-                      fontSize: 14, color: K.muted, fontFeatures: [FontFeature.tabularFigures()]))
-              : Text(s.servers.isEmpty ? 'Добавьте подписку, чтобы начать' : 'Нажми на тумблер',
-                  style: const TextStyle(fontSize: 14, color: K.muted)),
-        ),
-        if (connected && s.hasTraffic) ...[
-          const SizedBox(height: 10),
-          Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            _Speed(icon: Icons.arrow_downward_rounded, text: fmtSpeed(s.speedDown)),
-            const SizedBox(width: 18),
-            _Speed(icon: Icons.arrow_upward_rounded, text: fmtSpeed(s.speedUp)),
-          ]),
-          const SizedBox(height: 4),
-          Center(
-            child: Text('Всего: ${fmtBytes(s.totalDown + s.totalUp)}',
-                style: const TextStyle(fontSize: 12.5, color: K.muted)),
+          child: AnimatedSwitcher(
+            duration: kFast,
+            child: connected && s.connectedAt != null
+                ? ElapsedText(
+                    key: const ValueKey('timer'),
+                    since: s.connectedAt!,
+                    style: TextStyle(fontSize: 14, color: K.muted, fontFeatures: const [FontFeature.tabularFigures()]),
+                  )
+                : Text(
+                    s.servers.isEmpty ? 'Добавьте подписку, чтобы начать' : 'Нажми на тумблер',
+                    key: const ValueKey('hint'),
+                    style: TextStyle(fontSize: 14, color: K.muted),
+                  ),
           ),
-        ],
-        const SizedBox(height: 28),
+        ),
+        AnimatedSize(
+          duration: kMedium,
+          curve: Curves.easeOutCubic,
+          child: connected && s.settings.statsEnabled
+              ? Padding(padding: const EdgeInsets.only(top: 18), child: _TrafficCard(s: s))
+              : const SizedBox(width: double.infinity),
+        ),
+        if (Plat.ios && s.settings.showMemory && connected && s.memoryBytes != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Center(
+              child: Text(
+                'Память ядра: ${fmtBytes(s.memoryBytes!)} из ${s.settings.memoryLimitMb} МБ',
+                style: TextStyle(fontSize: 12.5, color: K.muted),
+              ),
+            ),
+          ),
+        const SizedBox(height: 24),
         if (!wide)
           KCard(
             onTap: onOpenServers,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             child: Row(children: [
-              Badge2(text: server == null ? '+' : (s.selectedId == AppState.autoId && !s.isOn ? 'A' : server.badge), dark: true, size: 44),
+              Badge2(
+                  text: server == null ? '+' : (s.selectedId == AppState.autoId && !s.isOn ? 'A' : server.badge),
+                  dark: true,
+                  size: 44),
               const SizedBox(width: 14),
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -124,12 +156,14 @@ class HomePanel extends StatelessWidget {
                   ),
                   const SizedBox(height: 3),
                   Text(
-                    server == null ? 'Ссылка, ключ или QR-код' : '${server.protocolLabel} · ${pingLabel(s.pings[server.id])}',
-                    style: const TextStyle(fontSize: 13, color: K.muted),
+                    server == null ? 'Ссылка, ключ или QR-код' : server.protocolLabel,
+                    style: TextStyle(fontSize: 13, color: K.muted),
                   ),
                 ]),
               ),
-              const Icon(Icons.chevron_right_rounded, color: K.muted),
+              if (server != null) PingIndicator(ms: s.pings[server.id], view: s.settings.pingView),
+              const SizedBox(width: 4),
+              Icon(Icons.chevron_right_rounded, color: K.muted),
             ]),
           ),
         const SizedBox(height: 14),
@@ -163,19 +197,42 @@ class HomePanel extends StatelessWidget {
   }
 }
 
-class _Speed extends StatelessWidget {
-  const _Speed({required this.icon, required this.text});
-  final IconData icon;
-  final String text;
+/// Отправлено / получено за сеанс и текущая скорость.
+class _TrafficCard extends StatelessWidget {
+  const _TrafficCard({required this.s});
+  final AppState s;
 
   @override
-  Widget build(BuildContext context) => Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(icon, size: 16, color: K.accent),
-        const SizedBox(width: 4),
-        Text(text,
-            style: const TextStyle(
-                fontSize: 14, fontWeight: FontWeight.w600, color: K.text2, fontFeatures: [FontFeature.tabularFigures()])),
-      ]);
+  Widget build(BuildContext context) {
+    Widget col(IconData icon, String title, int total, int speed) => Expanded(
+          child: Column(children: [
+            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Icon(icon, size: 16, color: K.accent),
+              const SizedBox(width: 4),
+              Text(title, style: TextStyle(fontSize: 12.5, color: K.muted, fontWeight: FontWeight.w500)),
+            ]),
+            const SizedBox(height: 4),
+            Text(
+              s.hasTraffic ? fmtBytes(total) : '—',
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, fontFeatures: [FontFeature.tabularFigures()]),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              s.hasTraffic ? fmtSpeed(speed) : ' ',
+              style: TextStyle(fontSize: 12, color: K.muted, fontFeatures: const [FontFeature.tabularFigures()]),
+            ),
+          ]),
+        );
+
+    return KCard(
+      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+      child: Row(children: [
+        col(Icons.arrow_upward_rounded, 'Отправлено', s.totalUp, s.speedUp),
+        Container(width: 1, height: 44, color: K.line),
+        col(Icons.arrow_downward_rounded, 'Получено', s.totalDown, s.speedDown),
+      ]),
+    );
+  }
 }
 
 class _Headline extends StatelessWidget {
@@ -187,7 +244,16 @@ class _Headline extends StatelessWidget {
   Widget build(BuildContext context) {
     final style = TextStyle(fontSize: size, height: 1.08, fontWeight: FontWeight.w800, letterSpacing: -1.2);
     return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 250),
+      duration: kMedium,
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeInCubic,
+      transitionBuilder: (child, a) => FadeTransition(
+        opacity: a,
+        child: SlideTransition(
+          position: Tween(begin: const Offset(0, 0.25), end: Offset.zero).animate(a),
+          child: child,
+        ),
+      ),
       child: Text(
         on ? 'Соединение защищено' : 'Подключить',
         key: ValueKey(on),

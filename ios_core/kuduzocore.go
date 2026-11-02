@@ -5,12 +5,14 @@ package kuduzocore
 import (
 	"errors"
 	"os"
+	"runtime"
 	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/xtls/xray-core/core"
+	"github.com/xtls/xray-core/features/stats"
 	"github.com/xtls/xray-core/infra/conf/serial"
 	_ "github.com/xtls/xray-core/main/distro/all"
 )
@@ -80,4 +82,32 @@ func Stop() error {
 // Version — версия Xray-core.
 func Version() string {
 	return core.Version()
+}
+
+// QueryTraffic — «отправлено,получено» байт через сервер с прошлого вызова (счётчики обнуляются).
+func QueryTraffic() string {
+	mu.Lock()
+	defer mu.Unlock()
+	if instance == nil {
+		return "0,0"
+	}
+	m, ok := instance.GetFeature(stats.ManagerType()).(stats.Manager)
+	if !ok || m == nil {
+		return "0,0"
+	}
+	var up, down int64
+	if c := m.GetCounter("outbound>>>proxy>>>traffic>>>uplink"); c != nil {
+		up = c.Set(0)
+	}
+	if c := m.GetCounter("outbound>>>proxy>>>traffic>>>downlink"); c != nil {
+		down = c.Set(0)
+	}
+	return strconv.FormatInt(up, 10) + "," + strconv.FormatInt(down, 10)
+}
+
+// MemoryUsage — сколько памяти (байт) занимает ядро Go в расширении VPN.
+func MemoryUsage() int64 {
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+	return int64(ms.Sys - ms.HeapReleased)
 }

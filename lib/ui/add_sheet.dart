@@ -58,7 +58,7 @@ Future<void> showAddSheet(BuildContext context) async {
               const Text('Добавить подписку или ключ',
                   style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -0.6)),
               const SizedBox(height: 6),
-              const Text('Вставьте ссылку на подписку (https://…) или ключи vless://, vmess://, trojan://, ss://, hy2://',
+              Text('Вставьте ссылку на подписку (https://…) или ключи vless://, vmess://, trojan://, ss://, hy2://',
                   style: TextStyle(fontSize: 13, color: K.muted)),
               const SizedBox(height: 16),
               TextField(
@@ -90,7 +90,7 @@ Future<void> showAddSheet(BuildContext context) async {
                   style: OutlinedButton.styleFrom(
                     foregroundColor: K.ink,
                     minimumSize: const Size.fromHeight(48),
-                    side: const BorderSide(color: K.line),
+                    side: BorderSide(color: K.line),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
                   ),
                   onPressed: busy
@@ -109,7 +109,7 @@ Future<void> showAddSheet(BuildContext context) async {
               ],
               const SizedBox(height: 18),
               busy
-                  ? const SizedBox(height: 60, child: Center(child: CircularProgressIndicator(color: K.ink)))
+                  ? SizedBox(height: 60, child: Center(child: CircularProgressIndicator(color: K.ink)))
                   : GradientButton(label: 'Добавить', icon: Icons.arrow_forward_rounded, onPressed: submit),
             ],
           ),

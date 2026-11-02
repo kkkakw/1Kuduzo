@@ -77,7 +77,28 @@ class SubscriptionClient {
   /// по заголовку User-Agent. Представляемся так же, как v2rayN.
   static const userAgent = 'v2rayN/7.10.0';
 
-  static Future<void> refresh(Subscription sub, {String? deviceId, String? agent}) async {
+  /// Журнал запросов подписок (раздел «Логи → Подписки»).
+  static final List<String> log = [];
+
+  static void _log(Subscription sub, String text) {
+    final t = DateTime.now();
+    String two(int n) => n.toString().padLeft(2, '0');
+    final host = Uri.tryParse(sub.url)?.host ?? sub.url;
+    log.add('${two(t.hour)}:${two(t.minute)}:${two(t.second)}  $host — $text');
+    if (log.length > 200) log.removeRange(0, log.length - 200);
+  }
+
+  static Future<void> refresh(Subscription sub, {String? deviceId, String? agent, int timeoutSec = 20}) async {
+    try {
+      await _refresh(sub, deviceId: deviceId, agent: agent, timeoutSec: timeoutSec);
+      _log(sub, 'обновлена, серверов: ${sub.links.length}');
+    } on SubscriptionException catch (e) {
+      _log(sub, 'ошибка: ${e.message}');
+      rethrow;
+    }
+  }
+
+  static Future<void> _refresh(Subscription sub, {String? deviceId, String? agent, required int timeoutSec}) async {
     if (Plat.web) {
       throw SubscriptionException('В демо-версии внутри чата подписки не загружаются — проверьте на телефоне или компьютере');
     }
@@ -87,7 +108,7 @@ class SubscriptionClient {
         'User-Agent': (agent == null || agent.isEmpty) ? userAgent : agent,
         'Accept': '*/*',
         if (deviceId != null) 'x-hwid': deviceId,
-      }).timeout(const Duration(seconds: 20));
+      }).timeout(Duration(seconds: timeoutSec.clamp(3, 60).toInt()));
     } catch (e) {
       throw SubscriptionException('Не удалось загрузить подписку: проверьте интернет');
     }

@@ -81,7 +81,25 @@ class MobileVpnBackend implements VpnBackend {
 
   @override
   Future<void> start(ServerConfig server, RoutingMode routing, {required bool tun, AppSettings? settings}) async {
-    final allowed = await _ch.invokeMethod<bool>('prepare') ?? false;
+    bool allowed;
+    try {
+      allowed = await _ch.invokeMethod<bool>('prepare') ?? false;
+    } on PlatformException catch (e) {
+      // iPhone: система отказала в создании VPN — почти всегда это подпись без Network Extension.
+      final raw = e.message ?? '';
+      final low = raw.toLowerCase();
+      final signing = low.contains('permission') ||
+          low.contains('ipc') ||
+          low.contains('nevpnerrordomain 5') ||
+          low.contains('configuration') ||
+          low.contains('entitlement');
+      _ctrl.add(VpnStatus(
+          VpnState.error,
+          signing
+              ? 'iOS не разрешил создать VPN: в подписи приложения нет права Network Extension ($raw)'
+              : 'iOS не разрешил создать VPN: $raw'));
+      return;
+    }
     if (!allowed) {
       _ctrl.add(const VpnStatus(VpnState.error, 'Нужно разрешить подключение VPN'));
       return;
@@ -92,21 +110,62 @@ class MobileVpnBackend implements VpnBackend {
         inbound: InboundMode.tunMobile,
         settings: st,
         lite: Plat.ios,
-        stats: Plat.android);
+        stats: st.statsEnabled || st.showMemory);
     _ctrl.add(const VpnStatus(VpnState.connecting));
     await _ch.invokeMethod('start', {
       'config': jsonEncode(config),
       'name': server.name,
       'splitMode': st.splitMode.name,
       'splitApps': st.splitApps,
+      ...tunnelOptions(st),
+      'tunnelJson': jsonEncode(tunnelOptions(st)),
     });
   }
 
+  /// Параметры системного туннеля (маршруты, DNS, On Demand, память).
+  static Map<String, dynamic> tunnelOptions(AppSettings st) => {
+        'dns': XrayConfigBuilder.tunnelDns(st),
+        'mtu': st.mtu,
+        'excludedRoutes': [
+          ...st.excludedRoutes,
+          // Android: локальная сеть мимо VPN через исключённые маршруты; на iPhone — флаг excludeLocalNetworks.
+          if (st.allowLan && Plat.android) ...AppSettings.routePresets['Локальные сети']!,
+        ],
+        'includedRoutes': st.includedRoutes,
+        'allowLan': st.allowLan,
+        'memoryLimit': st.memoryLimitMb,
+        'includeAllNetworks': st.includeAllNetworks,
+        'disconnectOnSleep': st.disconnectOnSleep,
+        'onDemand': st.onDemand,
+        'onDemandWifi': st.onDemandWifi,
+        'onDemandCellular': st.onDemandCellular,
+        'onDemandExcludedSsids': st.onDemandExcludedSsids,
+      };
+
+  /// iPhone: применить настройки туннеля (On Demand и т.п.) без подключения.
+  Future<void> applyOptions(AppSettings st) async {
+    if (!Plat.ios) return;
+    try {
+      await _ch.invokeMethod('configure', tunnelOptions(st));
+    } catch (_) {}
+  }
+
+  int? _memoryBytes;
+
+  /// iPhone: сколько памяти занимает ядро в расширении VPN.
+  int? get memoryBytes => _memoryBytes;
+
   @override
   Future<({int up, int down})?> trafficDelta() async {
-    if (!Plat.android) return null;
     try {
       final s = await _ch.invokeMethod<String>('stats') ?? '';
+      if (Plat.ios) {
+        // Расширение VPN отвечает «up,down,memory».
+        final f = s.split(',');
+        if (f.length < 2) return null;
+        if (f.length >= 3) _memoryBytes = int.tryParse(f[2]);
+        return (up: int.tryParse(f[0]) ?? 0, down: int.tryParse(f[1]) ?? 0);
+      }
       return parseLibStats(s);
     } catch (_) {
       return null;
@@ -326,7 +385,8 @@ class DesktopVpnBackend implements VpnBackend {
 
     if (!tun) {
       try {
-        await SystemProxy.enable('127.0.0.1', XrayConfigBuilder.httpPort, XrayConfigBuilder.socksPort);
+        final st = settings ?? AppSettings();
+        await SystemProxy.enable('127.0.0.1', st.httpPort, st.socksPort);
         _proxySet = true;
       } catch (e) {
         _ctrl.add(VpnStatus(VpnState.error, 'Не удалось включить системный прокси: $e'));

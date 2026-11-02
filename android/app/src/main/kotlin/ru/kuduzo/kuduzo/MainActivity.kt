@@ -52,12 +52,14 @@ class MainActivity : FlutterActivity() {
                     val name = call.argument<String>("name") ?: "Kuduzo"
                     val splitMode = call.argument<String>("splitMode") ?: "all"
                     val splitApps = ArrayList(call.argument<List<String>>("splitApps") ?: emptyList())
+                    val tunnel = call.argument<String>("tunnelJson") ?: "{}"
                     val i = Intent(this, KuduzoVpnService::class.java)
                         .setAction(KuduzoVpnService.ACTION_START)
                         .putExtra("config", config)
                         .putExtra("name", name)
                         .putExtra("splitMode", splitMode)
                         .putStringArrayListExtra("splitApps", splitApps)
+                        .putExtra("tunnel", tunnel)
                     if (Build.VERSION.SDK_INT >= 26) startForegroundService(i) else startService(i)
                     result.success(null)
                 }

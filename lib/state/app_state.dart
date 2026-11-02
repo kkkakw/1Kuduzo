@@ -52,6 +52,20 @@ class AppState extends ChangeNotifier {
   ServerConfig? activeServer;
   String deviceId = '';
 
+  /// Свёрнутые подписки в списке серверов (если включено «Сворачивание подписок»).
+  final Set<String> collapsed = {};
+
+  void toggleCollapsed(String subId) {
+    if (!collapsed.remove(subId)) collapsed.add(subId);
+    notifyListeners();
+  }
+
+  /// iPhone: память ядра в расширении VPN (байт).
+  int? get memoryBytes {
+    final b = _backend;
+    return b is MobileVpnBackend ? b.memoryBytes : null;
+  }
+
   bool get isOn => state == VpnState.connected || state == VpnState.connecting;
   bool get isDesktop => Plat.desktop;
 
@@ -100,6 +114,36 @@ class AppState extends ChangeNotifier {
 
   /// Ссылка kuduzo://… с сайта: добавить подписку или ключ.
   Future<void> handleLink(String link) async {
+    final t = link.trim();
+    final i = t.indexOf('://');
+    final cmd = i < 0 ? '' : t.substring(i + 3);
+    final low = cmd.toLowerCase();
+    if (low == 'connect' || low == 'connect/') {
+      if (!isOn) await connect();
+      return;
+    }
+    if (low == 'disconnect' || low == 'close' || low == 'disconnect/' || low == 'close/') {
+      if (isOn) await disconnect();
+      return;
+    }
+    if (low == 'toggle' || low == 'toggle/') {
+      await toggle();
+      return;
+    }
+    if (low == 'open' || low == 'open/' || low.isEmpty) return;
+    if (low == 'routing/off' || low == 'routing/off/') {
+      await updateSettings((s) => s.routingEnabled = false, reconnect: true);
+      say('Маршрутизация выключена');
+      return;
+    }
+    if (low.startsWith('routing/add/')) {
+      say(await importRouting(cmd.substring('routing/add/'.length)));
+      return;
+    }
+    if (low.startsWith('routing/onadd/')) {
+      say(await importRouting(cmd.substring('routing/onadd/'.length), enable: true));
+      return;
+    }
     final payload = LinkParser.fromAppLink(link);
     if (payload == null) {
       say('Не удалось разобрать ссылку');
@@ -116,6 +160,7 @@ class AppState extends ChangeNotifier {
 
   void _startTraffic() {
     _trafficTimer?.cancel();
+    if (!settings.statsEnabled && !(Plat.ios && settings.showMemory)) return;
     speedUp = speedDown = totalUp = totalDown = 0;
     hasTraffic = false;
     final period = Plat.desktop ? 2 : 1;
@@ -212,7 +257,12 @@ class AppState extends ChangeNotifier {
   Future<void> updateSettings(void Function(AppSettings s) change, {bool reconnect = false}) async {
     final oldStartup = settings.launchAtStartup;
     final oldMin = settings.startMinimized;
+    final oldTunnel = jsonEncode(MobileVpnBackend.tunnelOptions(settings));
     change(settings);
+    final b = _backend;
+    if (b is MobileVpnBackend && jsonEncode(MobileVpnBackend.tunnelOptions(settings)) != oldTunnel) {
+      unawaited(b.applyOptions(settings));
+    }
     await _prefs.setString('settings', settings.encode());
     _scheduleUpdates();
     if (oldStartup != settings.launchAtStartup || oldMin != settings.startMinimized) {
@@ -220,6 +270,48 @@ class AppState extends ChangeNotifier {
     }
     notifyListeners();
     if (reconnect && isOn) await connect();
+    if (isOn && !settings.statsEnabled && !settings.showMemory) _stopTraffic();
+  }
+
+  /// Сброс настроек к значениям по умолчанию (подписки и ключи остаются).
+  Future<void> resetSettings() async {
+    settings = AppSettings();
+    await _prefs.setString('settings', settings.encode());
+    _scheduleUpdates();
+    await _applyStartup(false);
+    notifyListeners();
+    if (isOn) await connect();
+  }
+
+  /// Полный сброс: настройки, подписки, ключи.
+  Future<void> resetAll() async {
+    if (isOn) await disconnect();
+    subscriptions.clear();
+    _manualLinks.clear();
+    pings.clear();
+    selectedId = autoId;
+    _rebuildServers();
+    await _save();
+    await resetSettings();
+  }
+
+  /// Импорт профиля маршрутизации из base64/JSON (ссылка kuduzo://routing/add/…).
+  Future<String> importRouting(String payload, {bool enable = false}) async {
+    var text = payload.trim();
+    if (!text.startsWith('{')) text = LinkParser.tryBase64(Uri.decodeComponent(text)) ?? text;
+    try {
+      final j = jsonDecode(text);
+      if (j is! Map<String, dynamic>) return 'Профиль маршрутизации не распознан';
+      var ok = false;
+      await updateSettings((s) {
+        ok = s.importRouting(j);
+        if (ok && enable) s.routingEnabled = true;
+      }, reconnect: enable);
+      if (!ok) return 'Профиль маршрутизации не распознан';
+      return enable ? 'Маршрутизация добавлена и включена' : 'Маршрутизация добавлена';
+    } catch (_) {
+      return 'Профиль маршрутизации не распознан';
+    }
   }
 
   Future<void> _applyStartup(bool on) async {
@@ -296,10 +388,22 @@ class AppState extends ChangeNotifier {
     if (t.isEmpty) return 'Пусто — вставьте ссылку';
     if (t.startsWith('http://') || t.startsWith('https://')) {
       final url = t.split(RegExp(r'\s')).first;
-      if (subscriptions.any((s) => s.url == url)) return 'Эта подписка уже добавлена';
+      final existing = subscriptions.where((s) => s.url == url).toList();
+      if (existing.isNotEmpty && settings.forbidDuplicates) {
+        await SubscriptionClient.refresh(existing.first,
+            deviceId: settings.sendHwid ? deviceId : null,
+            agent: settings.userAgent,
+            timeoutSec: settings.subTimeoutSec);
+        _rebuildServers();
+        await _save();
+        notifyListeners();
+        return 'Подписка уже была — обновлена: ${existing.first.servers.length} серв.';
+      }
       final sub = Subscription(id: _newDeviceId().substring(0, 8), url: url);
       await SubscriptionClient.refresh(sub,
-          deviceId: settings.sendHwid ? deviceId : null, agent: settings.userAgent); // бросает SubscriptionException
+          deviceId: settings.sendHwid ? deviceId : null,
+          agent: settings.userAgent,
+          timeoutSec: settings.subTimeoutSec); // бросает SubscriptionException
       subscriptions.add(sub);
       _rebuildServers();
       await _save();
@@ -325,10 +429,14 @@ class AppState extends ChangeNotifier {
 
   Future<String?> refreshAll({bool silent = false, bool ping = true}) async {
     String? error;
+    var updated = 0;
     for (final sub in subscriptions) {
       try {
         await SubscriptionClient.refresh(sub,
-            deviceId: settings.sendHwid ? deviceId : null, agent: settings.userAgent);
+            deviceId: settings.sendHwid ? deviceId : null,
+            agent: settings.userAgent,
+            timeoutSec: settings.subTimeoutSec);
+        updated++;
       } on SubscriptionException catch (e) {
         error = e.message;
       }
@@ -336,6 +444,9 @@ class AppState extends ChangeNotifier {
     _rebuildServers();
     await _save();
     notifyListeners();
+    if (settings.notifyUpdates && updated > 0) {
+      say(updated == 1 ? 'Подписка обновлена: ${servers.length} серв.' : 'Обновлено подписок: $updated');
+    }
     if (ping && settings.pingAfterUpdate) unawaited(pingAll());
     return error;
   }

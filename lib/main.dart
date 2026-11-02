@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 
 import 'core/desktop_shell.dart' if (dart.library.js_interop) 'core/desktop_shell_web.dart';
 import 'core/platform.dart';
+import 'core/settings.dart';
 import 'state/app_state.dart';
 import 'theme.dart';
 import 'ui/shell.dart';
@@ -73,6 +74,9 @@ class _KuduzoAppState extends State<KuduzoApp> {
   @override
   void initState() {
     super.initState();
+    widget.state.addListener(_onState);
+    _mode = _modeOf(widget.state.settings.theme);
+    _text = widget.state.settings.textSize;
     // На компьютере при закрытии программы выключаем ядро и системный прокси.
     _life = AppLifecycleListener(onExitRequested: () async {
       if (widget.state.isDesktop) await widget.state.shutdown();
@@ -82,8 +86,41 @@ class _KuduzoAppState extends State<KuduzoApp> {
 
   @override
   void dispose() {
+    widget.state.removeListener(_onState);
     _life.dispose();
     super.dispose();
+  }
+
+  ThemeMode _mode = ThemeMode.system;
+  UiSize _text = UiSize.normal;
+
+  static ThemeMode _modeOf(ThemePref t) => switch (t) {
+        ThemePref.system => ThemeMode.system,
+        ThemePref.light => ThemeMode.light,
+        ThemePref.dark => ThemeMode.dark,
+      };
+
+  void _onState() {
+    final st = widget.state.settings;
+    final mode = _modeOf(st.theme);
+    if (mode != _mode || st.textSize != _text) {
+      setState(() {
+        _mode = mode;
+        _text = st.textSize;
+      });
+    }
+  }
+
+  /// После смены темы перерисовываем всё дерево: цвета берутся из K на лету.
+  void _rebuildAll(BuildContext context) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      void mark(Element e) {
+        e.markNeedsBuild();
+        e.visitChildren(mark);
+      }
+
+      if (context.mounted) (context as Element).visitChildren(mark);
+    });
   }
 
   @override
@@ -93,8 +130,29 @@ class _KuduzoAppState extends State<KuduzoApp> {
       child: MaterialApp(
         title: 'Kuduzo VPN',
         debugShowCheckedModeBanner: false,
-        theme: K.theme(),
+        theme: K.theme(K.light),
+        darkTheme: K.theme(K.dark),
+        themeMode: _mode,
+        themeAnimationDuration: const Duration(milliseconds: 300),
         scaffoldMessengerKey: messengerKey,
+        builder: (context, child) {
+          final dark = Theme.of(context).brightness == Brightness.dark;
+          final pal = dark ? K.dark : K.light;
+          if (!identical(K.p, pal)) {
+            K.p = pal;
+            _rebuildAll(context);
+          }
+          final mq = MediaQuery.of(context);
+          final scale = switch (_text) {
+            UiSize.small => 0.9,
+            UiSize.normal => 1.0,
+            UiSize.large => 1.15,
+          };
+          return MediaQuery(
+            data: mq.copyWith(textScaler: TextScaler.linear(mq.textScaler.scale(1) * scale)),
+            child: child ?? const SizedBox(),
+          );
+        },
         home: const Shell(),
       ),
     );
