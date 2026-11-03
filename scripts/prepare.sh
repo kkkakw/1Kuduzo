@@ -49,16 +49,20 @@ case "$PLATFORM" in
     if ! grep -q "libv2ray.aar" "$GRADLE"; then
       cat >> "$GRADLE" <<'EOF'
 
-// --- Kuduzo: ядро Xray, правила R8 и постоянная подпись ---
-// Пароль ключа — секрет репозитория ANDROID_KEYSTORE_PASSWORD. Без него APK подписывается отладочным ключом.
+// --- Kuduzo: ядро Xray, правила R8, версии Android для Google Play и постоянная подпись ---
+// Ключ подписи хранится только в секретах GitHub: ANDROID_KEYSTORE_BASE64 (файл) и ANDROID_KEYSTORE_PASSWORD.
+// Сборка раскодирует его в android/upload.jks. Без секретов APK подписывается отладочным ключом.
 val kuduzoStorePassword: String? = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+val kuduzoStoreFile = rootProject.file("upload.jks")
 android {
+    compileSdk = 36
     defaultConfig {
         minSdk = 24
+        targetSdk = 36 // Google Play с 31.08.2026 требует Android 16 (API 36)
     }
     signingConfigs {
         create("kuduzo") {
-            storeFile = rootProject.file("kuduzo-release.jks")
+            storeFile = kuduzoStoreFile
             storePassword = kuduzoStorePassword
             keyAlias = "kuduzo"
             keyPassword = kuduzoStorePassword
@@ -67,7 +71,7 @@ android {
     buildTypes {
         getByName("release") {
             proguardFiles("proguard-rules.pro")
-            if (!kuduzoStorePassword.isNullOrEmpty()) {
+            if (!kuduzoStorePassword.isNullOrEmpty() && kuduzoStoreFile.exists()) {
                 signingConfig = signingConfigs.getByName("kuduzo")
             }
         }
@@ -108,6 +112,8 @@ EOF
     /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes array" "$PL" || true
     /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string kuduzo" "$PL" || true
     /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string Камера нужна, чтобы сканировать QR-код с ключом" "$PL" || true
+    # Ссылки kuduzo:// обрабатывает приложение (app_links), а не навигация Flutter.
+    /usr/libexec/PlistBuddy -c "Add :FlutterDeepLinkingEnabled bool false" "$PL" || /usr/libexec/PlistBuddy -c "Set :FlutterDeepLinkingEnabled false" "$PL" || true
     # Минимальная iOS 15 (нужна расширению VPN)
     sed -i '' "s/^# platform :ios.*/platform :ios, '15.0'/" ios/Podfile || true
     ;;

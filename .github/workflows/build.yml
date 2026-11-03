@@ -39,22 +39,41 @@ jobs:
             XRAY_LOCATION_ASSET=.dl/xray-linux .dl/xray-linux/xray run -test -c "$f" > /tmp/out.txt 2>&1 || { echo "ОШИБКА: $f"; cat /tmp/out.txt; exit 1; }
           done
           echo "Все конфиги приняты ядром"
-      - name: Сборка APK
+      - name: Ключ подписи из секретов
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > android/upload.jks
+            echo "Подпись: постоянный ключ Kuduzo"
+          else
+            echo "::warning::Секрет ANDROID_KEYSTORE_BASE64 не задан — APK будет подписан отладочным ключом"
+          fi
+      - name: Сборка APK и AAB
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-        run: flutter build apk --release --split-per-abi
+        run: |
+          # Общий APK для всех телефонов (ARM 32/64 бита и x86_64), отдельные — поменьше, AAB — для Google Play.
+          flutter build apk --release
+          cp build/app/outputs/flutter-apk/app-release.apk /tmp/universal.apk
+          flutter build apk --release --split-per-abi
+          flutter build appbundle --release
       - name: Переименование
         run: |
           mkdir -p dist
+          cp /tmp/universal.apk dist/Kuduzo-android.apk
           cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk dist/Kuduzo-android-arm64.apk
           cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk dist/Kuduzo-android-armv7.apk
+          cp build/app/outputs/bundle/release/app-release.aab dist/Kuduzo-android.aab
           VER=$(grep '^version:' pubspec.yaml | sed 's/version: *//')
           echo "{\"version\":\"${VER%%+*}\",\"build\":${VER##*+}}" > dist/version.json
           cat dist/version.json
       - uses: actions/upload-artifact@v4
         with:
           name: Kuduzo-Android
-          path: dist/*.apk
+          path: |
+            dist/*.apk
+            dist/*.aab
       - name: Релиз
         if: github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
@@ -64,6 +83,7 @@ jobs:
           make_latest: true
           files: |
             dist/*.apk
+            dist/*.aab
             dist/version.json
 
   windows:

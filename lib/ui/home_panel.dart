@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui' show FontFeature;
 
 import 'package:flutter/material.dart' hide Text;
@@ -74,8 +75,14 @@ class HomePanel extends StatelessWidget {
           child: KToggle(
             on: s.isOn,
             busy: busy,
-            width: toggleWidth(s.settings, wide),
+            // На узких экранах (320 dp) тумблер не должен вылезать за край.
+            width: math.min(toggleWidth(s.settings, wide), MediaQuery.sizeOf(context).width - 48),
             onTap: () async {
+              // Google Play: перед первым включением объяснить, зачем приложению VpnService.
+              if (Plat.android && !s.isOn && !s.settings.vpnDisclosureAccepted) {
+                if (!await showVpnDisclosure(context)) return;
+                await s.updateSettings((x) => x.vpnDisclosureAccepted = true);
+              }
               await s.toggle();
             },
           ),

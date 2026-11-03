@@ -98,6 +98,7 @@ class AppSettings {
   bool notifyUpdates = false;
   bool forbidDuplicates = true;
   bool geoLookup = true; // страна сервера по IP, если её нет в названии
+  bool vpnDisclosureAccepted = false; // Android: пользователь прочитал, зачем нужен VpnService (требование Google Play)
   bool collapseSubs = false;
 
   // ---- Пинг ----
@@ -177,6 +178,7 @@ class AppSettings {
         'notifyUpdates': notifyUpdates,
         'forbidDuplicates': forbidDuplicates,
         'geoLookup': geoLookup,
+        'vpnDisclosureAccepted': vpnDisclosureAccepted,
         'collapseSubs': collapseSubs,
         'pingView': pingView.name,
         'statsEnabled': statsEnabled,
@@ -261,6 +263,7 @@ class AppSettings {
     s.notifyUpdates = b('notifyUpdates', s.notifyUpdates);
     s.forbidDuplicates = b('forbidDuplicates', s.forbidDuplicates);
     s.geoLookup = b('geoLookup', s.geoLookup);
+    s.vpnDisclosureAccepted = b('vpnDisclosureAccepted', s.vpnDisclosureAccepted);
     s.collapseSubs = b('collapseSubs', s.collapseSubs);
     s.pingView = _enum(PingView.values, j['pingView'], s.pingView);
     s.statsEnabled = b('statsEnabled', s.statsEnabled);

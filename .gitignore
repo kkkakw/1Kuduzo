@@ -11,3 +11,5 @@ android/app/src/main/assets/*.dat
 .idea/
 .vscode/
 packages/kuduzo_vpn_ios/ios/Kuduzocore.xcframework/
+android/*.jks
+android/upload.jks

@@ -501,6 +501,10 @@ const Map<String, String> _en = {
   'сек': 'sec',
   'файл скачался не полностью': 'the file didn\'t download completely',
   'Язык': 'Language',
+  'Kuduzo создаст VPN-подключение': 'Kuduzo will create a VPN connection',
+  'Kuduzo использует VpnService Android, чтобы создать на этом телефоне зашифрованный туннель и направить интернет-трафик к серверу из вашей подписки. Это основная функция приложения.\n\nЧерез туннель проходит трафик приложений. Kuduzo не показывает рекламу, не собирает историю посещений и не передаёт содержимое трафика третьим лицам. Подробнее — в политике конфиденциальности (Настройки → О приложении).\n\nОтключить VPN можно в любой момент тумблером в приложении или в настройках Android.':
+      'Kuduzo uses Android VpnService to create an encrypted tunnel on this phone and route internet traffic to a server from your subscription. This is the app\'s core feature.\n\nApp traffic passes through the tunnel. Kuduzo shows no ads, does not collect browsing history and does not share traffic contents with third parties. See the privacy policy (Settings → About).\n\nYou can turn the VPN off at any time with the toggle in the app or in Android settings.',
+  'Разрешить': 'Allow',
   'Сайт проверки IP показывает российский адрес': 'An IP check site shows a Russian address',
   'В режиме «Зарубежные сайты» российские сайты (2ip.ru, yandex.ru) открываются напрямую — так и задумано. Проверяйте на зарубежном сайте, например ifconfig.me, или включите «Весь трафик». На компьютере браузер должен быть настроен на системный прокси; если программа его не видит — включите режим TUN.':
       'In “Foreign sites” mode, Russian sites (2ip.ru, yandex.ru) open directly — this is by design. Check on a foreign site such as ifconfig.me, or switch to “All traffic”. On a computer the browser must use the system proxy; if an app ignores it, turn on TUN mode.',

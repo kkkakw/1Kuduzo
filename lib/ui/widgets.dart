@@ -700,3 +700,30 @@ class RoundIconButton extends StatelessWidget {
     return tooltip == null ? btn : Tooltip(message: tr(tooltip!), child: btn);
   }
 }
+
+/// Отдельное раскрытие перед первым включением VPN на Android (политика Google Play о VpnService).
+Future<bool> showVpnDisclosure(BuildContext context) async {
+  final ok = await showDialog<bool>(
+    context: context,
+    barrierDismissible: false,
+    builder: (ctx) => AlertDialog(
+      backgroundColor: K.surface,
+      title: const Text('Kuduzo создаст VPN-подключение'),
+      content: const SingleChildScrollView(
+        child: Text(
+          'Kuduzo использует VpnService Android, чтобы создать на этом телефоне зашифрованный туннель '
+          'и направить интернет-трафик к серверу из вашей подписки. Это основная функция приложения.\n\n'
+          'Через туннель проходит трафик приложений. Kuduzo не показывает рекламу, не собирает историю '
+          'посещений и не передаёт содержимое трафика третьим лицам. Подробнее — в политике конфиденциальности '
+          '(Настройки → О приложении).\n\n'
+          'Отключить VPN можно в любой момент тумблером в приложении или в настройках Android.',
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
+        TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Разрешить')),
+      ],
+    ),
+  );
+  return ok ?? false;
+}
