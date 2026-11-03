@@ -92,6 +92,11 @@ class ServerConfig {
     return letters.substring(0, letters.length >= 2 ? 2 : 1).toUpperCase();
   }
 
+  /// Служебная запись подписки («Осталось 30 дней», «Трафик: 10 ГБ»): ключ-заглушка без настоящего сервера.
+  bool get isInfo =>
+      const {'0.0.0.0', '127.0.0.1', 'localhost', '::', '::1', '[::]', '[::1]'}.contains(address.toLowerCase()) ||
+      port <= 1;
+
   /// Название без флага в начале.
   String get title {
     final runes = name.runes.toList();

@@ -152,6 +152,10 @@ class _SubHeader extends StatelessWidget {
     final web = sub.webPageUrl;
     final support = sub.supportUrl;
     final updated = sub.updatedAt;
+    final notes = sub.notes;
+    // «Продлить» — когда подписка истекла или до конца меньше недели.
+    final renew = sub.renewUrl.isNotEmpty &&
+        (expired || (sub.expire != null && sub.expire!.difference(DateTime.now()).inDays < 7));
 
     return KCard(
       padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
@@ -267,11 +271,43 @@ class _SubHeader extends StatelessWidget {
         ]),
         if (sub.announce.isNotEmpty) ...[
           const SizedBox(height: 10),
-          Text(sub.announce, style: TextStyle(fontSize: 14, color: K.text2, height: 1.35)),
+          GestureDetector(
+            onTap: sub.announceUrl.isEmpty ? null : () => openUrl(sub.announceUrl),
+            child: Text(sub.announce,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: K.text2,
+                  height: 1.35,
+                  decoration: sub.announceUrl.isEmpty ? null : TextDecoration.underline,
+                  decorationColor: K.line,
+                )),
+          ),
         ],
-        if (web.isNotEmpty || support.isNotEmpty) ...[
+        // Служебные записи подписки («Осталось 30 дней») — текстом, а не серверами.
+        for (final note in notes) ...[
+          const SizedBox(height: 6),
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Icon(Icons.info_outline_rounded, size: 15, color: K.muted),
+            ),
+            const SizedBox(width: 6),
+            Expanded(child: Text(note, style: TextStyle(fontSize: 13.5, color: K.text2, height: 1.3))),
+          ]),
+        ],
+        if (sub.infoText.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          _InfoBanner(
+            text: sub.infoText,
+            color: _infoColor(sub.infoColor),
+            button: sub.infoButtonText.isNotEmpty && sub.infoButtonUrl.isNotEmpty ? sub.infoButtonText : null,
+            onButton: () => openUrl(sub.infoButtonUrl),
+          ),
+        ],
+        if (web.isNotEmpty || support.isNotEmpty || renew) ...[
           const SizedBox(height: 12),
           Wrap(spacing: 8, runSpacing: 8, children: [
+            if (renew) _LinkChip(icon: Icons.autorenew_rounded, label: 'Продлить', onTap: () => openUrl(sub.renewUrl)),
             if (web.isNotEmpty)
               _LinkChip(
                 icon: web.contains('t.me/') ? Icons.campaign_rounded : Icons.public_rounded,
@@ -300,6 +336,52 @@ class _SubHeader extends StatelessWidget {
       ]),
     );
   }
+}
+
+Color _infoColor(String c) => switch (c) {
+      'red' => K.bad,
+      'green' => K.good,
+      'blue' => const Color(0xFF3B82F6),
+      'orange' || 'yellow' => K.warn,
+      _ => K.accent,
+    };
+
+/// Плашка провайдера (sub-info-text) с необязательной кнопкой.
+class _InfoBanner extends StatelessWidget {
+  const _InfoBanner({required this.text, required this.color, this.button, required this.onButton});
+  final String text;
+  final Color color;
+  final String? button;
+  final VoidCallback onButton;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: color.withValues(alpha: 0.35)),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(text, style: TextStyle(fontSize: 13.5, color: K.ink, height: 1.35)),
+          if (button != null) ...[
+            const SizedBox(height: 8),
+            Pressable(
+              onTap: () {
+                haptic(context);
+                onButton();
+              },
+              scale: 0.95,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(10)),
+                child: Text(button!, style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: Colors.white)),
+              ),
+            ),
+          ],
+        ]),
+      );
 }
 
 /// Кнопка-ссылка провайдера подписки.

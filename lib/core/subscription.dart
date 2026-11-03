@@ -21,6 +21,13 @@ class Subscription {
     this.supportUrl = '',
     this.webPageUrl = '',
     this.announce = '',
+    this.announceUrl = '',
+    this.infoText = '',
+    this.infoColor = '',
+    this.infoButtonText = '',
+    this.infoButtonUrl = '',
+    this.renewUrl = '',
+    this.updateHours = 0,
   });
 
   final String id;
@@ -39,8 +46,25 @@ class Subscription {
   String supportUrl;
   String webPageUrl;
 
-  /// Объявление провайдера (заголовок announce), как в Happ и INCY.
+  /// Объявление провайдера (announce) и ссылка по нажатию на него (announce-url).
   String announce;
+  String announceUrl;
+
+  /// Информационная плашка провайдера (sub-info-text/-color/-button-text/-button-link, как в Happ).
+  String infoText;
+  String infoColor;
+  String infoButtonText;
+  String infoButtonUrl;
+
+  /// Ссылка «Продлить» (sub-expire-button-link) и рекомендуемый интервал обновления в часах.
+  String renewUrl;
+  int updateHours;
+
+  /// Служебные записи подписки вида «Осталось 30 дней» — ключи-заглушки с адресом 0.0.0.0.
+  List<String> get notes => [
+        for (final x in LinkParser.parseMany(links.join('\n'), subscriptionId: id))
+          if (x.isInfo) x.title,
+      ];
 
   String get displayTitle {
     if (title.isNotEmpty) return title;
@@ -61,6 +85,13 @@ class Subscription {
         'supportUrl': supportUrl,
         'webPageUrl': webPageUrl,
         'announce': announce,
+        'announceUrl': announceUrl,
+        'infoText': infoText,
+        'infoColor': infoColor,
+        'infoButtonText': infoButtonText,
+        'infoButtonUrl': infoButtonUrl,
+        'renewUrl': renewUrl,
+        'updateHours': updateHours,
       };
 
   factory Subscription.fromJson(Map<String, dynamic> j) => Subscription(
@@ -76,9 +107,18 @@ class Subscription {
         supportUrl: (j['supportUrl'] ?? '') as String,
         webPageUrl: (j['webPageUrl'] ?? '') as String,
         announce: (j['announce'] ?? '') as String,
+        announceUrl: (j['announceUrl'] ?? '') as String,
+        infoText: (j['infoText'] ?? '') as String,
+        infoColor: (j['infoColor'] ?? '') as String,
+        infoButtonText: (j['infoButtonText'] ?? '') as String,
+        infoButtonUrl: (j['infoButtonUrl'] ?? '') as String,
+        renewUrl: (j['renewUrl'] ?? '') as String,
+        updateHours: (j['updateHours'] ?? 0) as int,
       );
 
-  List<ServerConfig> get servers => LinkParser.parseMany(links.join('\n'), subscriptionId: id);
+  /// Настоящие серверы (без служебных записей-заглушек).
+  List<ServerConfig> get servers =>
+      LinkParser.parseMany(links.join('\n'), subscriptionId: id).where((x) => !x.isInfo).toList();
 }
 
 class SubscriptionException implements Exception {
@@ -142,17 +182,40 @@ class SubscriptionClient {
     }
     sub.links = servers.map((s) => s.link).toList();
     sub.updatedAt = DateTime.now();
-    _applyHeaders(sub, res.headers);
+    applyMeta(sub, collectMeta(res.headers, body));
   }
 
-  static void _applyHeaders(Subscription sub, Map<String, String> h) {
+  /// Сведения о подписке из заголовков ответа и из строк «#ключ: значение» в начале тела
+  /// (так их передают многие панели). Заголовки важнее строк в теле.
+  static Map<String, String> collectMeta(Map<String, String> headers, String body) {
+    final meta = <String, String>{};
+    headers.forEach((k, v) => meta[k.toLowerCase().trim()] = v);
+    var text = body.trim();
+    if (!text.contains('://') && !text.startsWith('#')) text = LinkParser.tryBase64(text) ?? text;
+    final re = RegExp(r'^\s*(?:#|//)\s*([A-Za-z][A-Za-z0-9_-]*)\s*[:=]\s*(.+?)\s*$');
+    for (final line in const LineSplitter().convert(text)) {
+      final m = re.firstMatch(line);
+      if (m != null) meta.putIfAbsent(m.group(1)!.toLowerCase().replaceAll('_', '-'), () => m.group(2)!);
+    }
+    return meta;
+  }
+
+  /// Текстовое значение: поддерживает «base64:…» и обрезает слишком длинное.
+  static String _text(String? v, {int max = 400}) {
+    if (v == null) return '';
+    var t = v.trim();
+    if (t.startsWith('base64:')) t = LinkParser.tryBase64(t.substring(7))?.trim() ?? '';
+    return t.length > max ? '${t.substring(0, max)}…' : t;
+  }
+
+  static void applyMeta(Subscription sub, Map<String, String> h) {
     final info = h['subscription-userinfo'];
     if (info != null) {
       for (final part in info.split(';')) {
         final kv = part.trim().split('=');
         if (kv.length != 2) continue;
-        final v = int.tryParse(kv[1].trim()) ?? 0;
-        switch (kv[0].trim()) {
+        final v = int.tryParse(kv[1].trim().split('.').first) ?? 0;
+        switch (kv[0].trim().toLowerCase()) {
           case 'upload':
             sub.upload = v;
           case 'download':
@@ -164,26 +227,41 @@ class SubscriptionClient {
         }
       }
     }
-    String? link(String key) {
-      final v = h[key]?.trim();
-      final u = v == null ? null : Uri.tryParse(v);
-      return u != null && (u.scheme == 'https' || u.scheme == 'http' || u.scheme == 'tg') ? v : null;
+    String link(String key, String old) {
+      final v = _text(h[key], max: 2000);
+      final u = Uri.tryParse(v);
+      if (v.isEmpty || u == null) return h.containsKey(key) ? '' : old;
+      return const {'https', 'http', 'tg', 'mailto'}.contains(u.scheme) ? v : old;
     }
 
-    sub.supportUrl = link('support-url') ?? sub.supportUrl;
-    sub.webPageUrl = link('profile-web-page-url') ?? sub.webPageUrl;
-    final a = h['announce'];
-    if (a != null) {
-      final text = a.startsWith('base64:') ? (LinkParser.tryBase64(a.substring(7)) ?? '') : a;
-      sub.announce = text.trim().length > 400 ? '${text.trim().substring(0, 400)}…' : text.trim();
-    }
-    final t = h['profile-title'];
-    if (t != null && t.isNotEmpty) {
-      if (t.startsWith('base64:')) {
-        sub.title = LinkParser.tryBase64(t.substring(7)) ?? sub.title;
-      } else {
-        sub.title = t;
+    String text(String key, String old) => h.containsKey(key) ? _text(h[key]) : old;
+
+    sub.supportUrl = link('support-url', sub.supportUrl);
+    sub.webPageUrl = link('profile-web-page-url', sub.webPageUrl);
+    sub.announce = text('announce', sub.announce);
+    sub.announceUrl = link('announce-url', sub.announceUrl);
+    sub.infoText = text('sub-info-text', sub.infoText);
+    sub.infoColor = text('sub-info-color', sub.infoColor).toLowerCase();
+    sub.infoButtonText = text('sub-info-button-text', sub.infoButtonText);
+    sub.infoButtonUrl = link('sub-info-button-link', sub.infoButtonUrl);
+    sub.renewUrl = link('sub-expire-button-link', sub.renewUrl);
+    final hours = int.tryParse((h['profile-update-interval'] ?? '').trim());
+    if (hours != null) sub.updateHours = hours.clamp(0, 168);
+
+    // Название: profile-title, иначе имя файла из content-disposition (так делает v2rayN).
+    var title = _text(h['profile-title'], max: 80);
+    if (title.isEmpty) {
+      final cd = h['content-disposition'] ?? '';
+      final m = RegExp(r"filename\*=UTF-8''([^;]+)", caseSensitive: false).firstMatch(cd) ??
+          RegExp(r'filename="?([^";]+)"?', caseSensitive: false).firstMatch(cd);
+      if (m != null) {
+        try {
+          title = Uri.decodeComponent(m.group(1)!).trim();
+        } catch (_) {
+          title = m.group(1)!.trim();
+        }
       }
     }
+    if (title.isNotEmpty) sub.title = title;
   }
 }

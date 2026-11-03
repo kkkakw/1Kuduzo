@@ -362,7 +362,11 @@ class AppState extends ChangeNotifier {
   void _scheduleUpdates() {
     _updateTimer?.cancel();
     if (!settings.autoUpdate) return;
-    final h = settings.updateIntervalHours.clamp(1, 48).toInt();
+    var h = settings.updateIntervalHours.clamp(1, 48).toInt();
+    // Провайдер может попросить обновлять чаще (заголовок profile-update-interval).
+    for (final sub in subscriptions) {
+      if (sub.updateHours > 0 && sub.updateHours < h) h = sub.updateHours;
+    }
     _updateTimer = Timer.periodic(Duration(hours: h), (_) => refreshAll(silent: true));
   }
 
@@ -563,6 +567,7 @@ class AppState extends ChangeNotifier {
       say(updated == 1 ? 'Подписка обновлена: ${servers.length} серв.' : 'Обновлено подписок: $updated');
     }
     if (ping && settings.pingAfterUpdate) unawaited(pingAll());
+    if (!silent) _scheduleUpdates();
     return error;
   }
 

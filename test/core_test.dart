@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:kuduzo/core/country.dart';
 import 'package:kuduzo/core/link_parser.dart';
 import 'package:kuduzo/core/settings.dart';
+import 'package:kuduzo/core/subscription.dart';
 import 'package:kuduzo/core/vpn_backend.dart';
 import 'package:kuduzo/core/xray_config.dart';
 
@@ -226,5 +227,41 @@ void main() {
       expect(text.startsWith('# '), isTrue, reason: f);
       expect(text.contains('t.me/kuduzohelpbot'), isTrue, reason: f);
     }
+  });
+
+  test('сведения подписки из заголовков и из тела', () {
+    final body = [
+      '#profile-title: base64:${base64.encode(utf8.encode('Мой VPN'))}',
+      '#announce: Работаем по всему миру',
+      '#support-url: https://t.me/example_support',
+      vlessReality,
+      'vless://00000000-1111-2222-3333-444444444444@0.0.0.0:1?type=tcp#Осталось%2030%20дней',
+    ].join('\n');
+    final meta = SubscriptionClient.collectMeta({
+      'subscription-userinfo': 'upload=10; download=20; total=1000; expire=0',
+      'profile-web-page-url': 'https://t.me/example_channel',
+      'announce': 'base64:${base64.encode(utf8.encode('Из заголовка'))}',
+      'profile-update-interval': '6',
+    }, base64.encode(utf8.encode(body)));
+    final sub = Subscription(id: 's1', url: 'https://example.com/sub');
+    SubscriptionClient.applyMeta(sub, meta);
+    sub.links = [vlessReality, 'vless://00000000-1111-2222-3333-444444444444@0.0.0.0:1?type=tcp#Осталось%2030%20дней'];
+    expect(sub.title, 'Мой VPN');
+    expect(sub.announce, 'Из заголовка'); // заголовок важнее строки в теле
+    expect(sub.supportUrl, 'https://t.me/example_support');
+    expect(sub.webPageUrl, 'https://t.me/example_channel');
+    expect(sub.upload + sub.download, 30);
+    expect(sub.total, 1000);
+    expect(sub.expire, isNull);
+    expect(sub.updateHours, 6);
+    expect(sub.servers.length, 1);
+    expect(sub.notes, ['Осталось 30 дней']);
+    final back = Subscription.fromJson(jsonDecode(jsonEncode(sub.toJson())) as Map<String, dynamic>);
+    expect(back.announce, 'Из заголовка');
+    expect(back.updateHours, 6);
+
+    final cd = Subscription(id: 's2', url: 'https://example.com/2');
+    SubscriptionClient.applyMeta(cd, {'content-disposition': "attachment; filename*=UTF-8''%D0%9F%D1%80%D0%BE%D0%B2%D0%B0%D0%B9%D0%B4%D0%B5%D1%80"});
+    expect(cd.title, 'Провайдер');
   });
 }
