@@ -201,6 +201,48 @@ class AppState extends ChangeNotifier {
     } catch (_) {}
   }
 
+  // ---------- обновление на Windows ----------
+
+  /// Скачивание установщика: доля 0..1 (null — не скачивается).
+  double? updateProgress;
+
+  /// Windows: скачать установщик новой версии, запустить его тихо и закрыть программу —
+  /// установщик заменит файлы и сам откроет Kuduzo. Возвращает текст ошибки.
+  Future<String?> installUpdate() async {
+    if (!Plat.windows || updateProgress != null) return null;
+    updateProgress = 0;
+    notifyListeners();
+    final client = http.Client();
+    try {
+      final res = await client.send(http.Request('GET', Uri.parse(windowsSetupUrl)));
+      if (res.statusCode != 200) throw 'сервер ответил ${res.statusCode}';
+      final total = res.contentLength ?? 0;
+      final file = File('${Directory.systemTemp.path}${Platform.pathSeparator}Kuduzo-VPN-Setup-x64.exe');
+      final sink = file.openWrite();
+      var got = 0;
+      await for (final chunk in res.stream.timeout(const Duration(seconds: 30))) {
+        sink.add(chunk);
+        got += chunk.length;
+        if (total > 0) {
+          updateProgress = got / total;
+          notifyListeners();
+        }
+      }
+      await sink.close();
+      if (total > 0 && got < total) throw 'файл скачался не полностью';
+      await shutdown();
+      await Process.start(file.path, ['/SILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS'],
+          mode: ProcessStartMode.detached);
+      exit(0);
+    } catch (e) {
+      updateProgress = null;
+      notifyListeners();
+      return 'Не удалось обновить: $e';
+    } finally {
+      client.close();
+    }
+  }
+
   /// Ссылка kuduzo://… с сайта: добавить подписку или ключ.
   Future<void> handleLink(String link) async {
     final t = link.trim();

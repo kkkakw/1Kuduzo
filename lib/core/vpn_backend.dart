@@ -395,6 +395,25 @@ class MobileVpnBackend implements VpnBackend {
     }
   }
 
+  /// Android: «Постоянный VPN» и «Блокировать без VPN» (null — VPN выключен или Android старше 10).
+  static Future<Map<String, bool>?> alwaysOnState() async {
+    try {
+      final m = await _ch.invokeMapMethod<String, bool>('alwaysOn');
+      return m;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Android: открыть системные настройки VPN.
+  static Future<bool> openVpnSettings() async {
+    try {
+      return await _ch.invokeMethod<bool>('openVpnSettings') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Версия ядра Xray (iPhone — ядро в приложении, Android — libv2ray).
   static Future<String?> coreVersion() async {
     try {

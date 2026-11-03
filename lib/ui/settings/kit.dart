@@ -1,10 +1,11 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Text;
 import 'package:flutter/services.dart';
 
 import '../../core/settings.dart';
 import '../../state/app_state.dart';
 import '../../theme.dart';
 import '../widgets.dart';
+import '../../i18n.dart';
 
 // Строительные блоки раздела «Настройки» — сгруппированные списки как в iOS.
 
@@ -88,7 +89,7 @@ class SGroup extends StatelessWidget {
         if (title != null)
           Padding(
             padding: const EdgeInsets.fromLTRB(18, 0, 18, 8),
-            child: Text(title!.toUpperCase(),
+            child: Text(tr(title!).toUpperCase(),
                 style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: K.muted, letterSpacing: 0.6)),
           ),
         if (rows.isNotEmpty)
@@ -324,7 +325,7 @@ class SStepper extends StatelessWidget {
             decoration: BoxDecoration(color: K.chip, borderRadius: BorderRadius.circular(22)),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
               IconButton(
-                tooltip: 'Меньше',
+                tooltip: tr('Меньше'),
                 onPressed: value - step >= min
                     ? () {
                         haptic(context);
@@ -335,7 +336,7 @@ class SStepper extends StatelessWidget {
               ),
               Container(width: 1, height: 22, color: K.radioOff),
               IconButton(
-                tooltip: 'Больше',
+                tooltip: tr('Больше'),
                 onPressed: value + step <= max
                     ? () {
                         haptic(context);
@@ -482,7 +483,7 @@ class _STextState extends State<SText> {
       style: TextStyle(fontSize: 14.5, color: K.ink),
       decoration: InputDecoration(
         isDense: true,
-        hintText: widget.hint,
+        hintText: widget.hint == null ? null : tr(widget.hint!),
         hintStyle: TextStyle(color: K.muted),
         filled: true,
         fillColor: K.bg,
@@ -675,7 +676,7 @@ class _ListEditPageState extends State<ListEditPage> {
                 maxLines: 16,
                 style: TextStyle(fontSize: 14, fontFamily: 'monospace', color: K.ink),
                 decoration: InputDecoration(
-                  hintText: widget.hint,
+                  hintText: widget.hint == null ? null : tr(widget.hint!),
                   hintStyle: TextStyle(color: K.muted),
                   filled: true,
                   fillColor: K.bg,

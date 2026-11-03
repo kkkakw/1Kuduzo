@@ -1,6 +1,6 @@
 import 'dart:ui' show ImageFilter;
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Text;
 
 import '../core/platform.dart';
 import '../theme.dart';
@@ -8,6 +8,7 @@ import 'home_panel.dart';
 import 'servers_panel.dart';
 import 'settings/pages.dart';
 import 'widgets.dart';
+import '../i18n.dart';
 
 /// Телефон: вкладки внизу. Компьютер (широкое окно): меню слева.
 class Shell extends StatefulWidget {

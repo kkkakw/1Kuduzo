@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Text;
 import 'package:flutter/services.dart';
 
 import '../../core/ping.dart';
@@ -15,6 +15,7 @@ import '../apps_screen.dart';
 import '../widgets.dart';
 import 'kit.dart';
 import 'sysinfo.dart';
+import '../../i18n.dart';
 
 // ============================================================================
 // Корень раздела «Настройки»
@@ -32,6 +33,12 @@ class SettingsRoot extends StatelessWidget {
 
     final groups = <Widget>[
       SGroup(title: 'Интерфейс', children: [
+        SChoice<AppLang>(
+          title: 'Язык',
+          value: st.language,
+          options: const [(AppLang.system, 'Как в системе'), (AppLang.ru, 'Русский'), (AppLang.en, 'English')],
+          onChanged: (v) => setS(context, (x) => x.language = v),
+        ),
         SChoice<ThemePref>(
           title: 'Тема оформления',
           value: st.theme,
@@ -109,6 +116,19 @@ class SettingsRoot extends StatelessWidget {
             subtitle: 'Режим TUN: запросы DNS других программ не уйдут мимо VPN',
             value: st.leakProtection,
             onChanged: (v) => setS(context, (x) => x.leakProtection = v, reconnect: true),
+          ),
+        if (Plat.ios)
+          SSwitch(
+            title: 'Kill switch',
+            subtitle: 'Если VPN отключится, интернет блокируется. Весь трафик, включая системный, идёт через VPN',
+            value: st.includeAllNetworks,
+            onChanged: (v) => setS(context, (x) => x.includeAllNetworks = v, reconnect: true),
+          ),
+        if (Plat.android)
+          SNav(
+            title: 'Постоянный VPN и kill switch',
+            subtitle: 'VPN включается сам, без VPN интернет блокируется',
+            onTap: () => pushPage(context, const KillSwitchPage()),
           ),
         SSwitch(
           title: 'Разрешить LAN подключения',
@@ -765,7 +785,7 @@ class PingPage extends StatelessWidget {
         children: [
         for (final m in Pinger.available)
           SRadio(
-            title: SettingsLabels.method(m) + (m == PingMethod.real ? ' (рекомендуется)' : ''),
+            title: tr(SettingsLabels.method(m)) + (m == PingMethod.real ? tr(' (рекомендуется)') : ''),
             subtitle: SettingsLabels.methodDesc(m),
             selected: effective == m,
             onTap: () => setS(context, (x) => x.pingMethod = m),
@@ -911,7 +931,7 @@ class _LogViewPageState extends State<LogViewPage> {
     return SettingsPage(
       title: widget.core ? 'Tunnel' : 'Подписки',
       action: IconButton(
-        tooltip: 'Копировать',
+        tooltip: tr('Копировать'),
         icon: Icon(Icons.copy_rounded, color: K.ink),
         onPressed: lines.isEmpty
             ? null
@@ -1137,7 +1157,18 @@ class _AboutPageState extends State<AboutPage> {
       ]),
       SGroup(children: [
         if (s.updateVersion != null)
-          SAction(title: 'Скачать версию ${s.updateVersion}', icon: Icons.system_update_rounded, onTap: () => openUrl(releasesPage))
+          SAction(
+            title: s.updateProgress != null
+                ? 'Загрузка: ${(s.updateProgress! * 100).round()}%'
+                : (Plat.windows ? 'Обновить до версии ${s.updateVersion}' : 'Скачать версию ${s.updateVersion}'),
+            icon: Icons.system_update_rounded,
+            busy: s.updateProgress != null,
+            onTap: () async {
+              if (!Plat.windows) return openUrl(releasesPage);
+              final err = await s.installUpdate();
+              if (err != null && context.mounted) toast(context, err);
+            },
+          )
         else if (!Plat.web)
           SAction(
             title: 'Проверить обновления',
@@ -1165,6 +1196,76 @@ class _AboutPageState extends State<AboutPage> {
   }
 }
 
+/// Android: «Постоянный VPN» и «Блокировать соединения без VPN» включаются в системных настройках.
+class KillSwitchPage extends StatefulWidget {
+  const KillSwitchPage({super.key});
+
+  @override
+  State<KillSwitchPage> createState() => _KillSwitchPageState();
+}
+
+class _KillSwitchPageState extends State<KillSwitchPage> with WidgetsBindingObserver {
+  Map<String, bool>? _state;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _load();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  // Вернулись из настроек Android — обновляем состояние.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState s) {
+    if (s == AppLifecycleState.resumed) _load();
+  }
+
+  Future<void> _load() async {
+    final v = await MobileVpnBackend.alwaysOnState();
+    if (mounted) setState(() => _state = v);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final st = _state;
+    String mark(bool? v) => v == null ? '—' : (v ? 'Вкл.' : 'Выкл.');
+    return SettingsPage(title: 'Kill switch', children: [
+      SGroup(
+        footer: st == null ? 'Состояние видно, когда VPN включён (Android 10 и новее).' : null,
+        children: [
+          SInfo(title: 'Постоянный VPN', value: mark(st?['alwaysOn'])),
+          SInfo(title: 'Блокировать без VPN', value: mark(st?['lockdown'])),
+        ],
+      ),
+      SGroup(
+        title: 'Как включить',
+        footer: 'Android сам запустит Kuduzo при включении телефона и не пустит трафик мимо VPN. '
+            'Приложение подключится к последнему выбранному серверу.',
+        children: [
+          const SInfo(title: '1. Откройте настройки VPN', value: ''),
+          const SInfo(title: '2. Нажмите ⚙ рядом с Kuduzo', value: ''),
+          const SInfo(title: '3. Включите «Постоянная VPN»', value: ''),
+          const SInfo(title: '4. Включите «Блокировать без VPN»', value: ''),
+          SAction(
+            title: 'Открыть настройки VPN',
+            icon: Icons.open_in_new_rounded,
+            onTap: () async {
+              final ok = await MobileVpnBackend.openVpnSettings();
+              if (!ok && context.mounted) toast(context, 'Откройте вручную: Настройки → Сеть → VPN');
+            },
+          ),
+        ],
+      ),
+    ]);
+  }
+}
+
 /// Документ из assets/legal: «# » — заголовок, «## » — раздел, «- » — пункт списка.
 class LegalPage extends StatelessWidget {
   const LegalPage({super.key, required this.title, required this.asset});
@@ -1183,7 +1284,14 @@ class LegalPage extends StatelessWidget {
               child: Center(child: CircularProgressIndicator.adaptive()),
             );
           }
-          final blocks = <Widget>[];
+          final blocks = <Widget>[
+            if (L.en)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text('Документ доступен только на русском языке.',
+                    style: TextStyle(fontSize: 14, color: K.accent, fontWeight: FontWeight.w600)),
+              ),
+          ];
           for (final raw in snap.data!.split('\n')) {
             final line = raw.trimRight();
             if (line.isEmpty) continue;

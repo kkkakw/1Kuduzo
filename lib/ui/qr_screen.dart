@@ -1,7 +1,8 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Text;
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../theme.dart';
+import '../i18n.dart';
 
 /// Сканер QR-кода с ключом или ссылкой на подписку. Возвращает текст из кода.
 class QrScreen extends StatefulWidget {

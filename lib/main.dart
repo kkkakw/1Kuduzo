@@ -4,7 +4,7 @@ import 'dart:ui';
 
 import 'package:app_links/app_links.dart';
 import 'package:flutter/foundation.dart' show LicenseEntryWithLineBreaks, LicenseRegistry;
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Text;
 
 import 'core/desktop_shell.dart' if (dart.library.js_interop) 'core/desktop_shell_web.dart';
 import 'core/platform.dart';
@@ -13,6 +13,7 @@ import 'state/app_state.dart';
 import 'theme.dart';
 import 'ui/shell.dart';
 import 'ui/widgets.dart';
+import 'i18n.dart';
 
 final messengerKey = GlobalKey<ScaffoldMessengerState>();
 
@@ -28,6 +29,7 @@ Future<void> main(List<String> args) async {
   }
 
   await state.load();
+  L.apply(state.settings.language);
   runApp(KuduzoApp(state: state));
 
   state.messages.listen((m) {
@@ -79,6 +81,7 @@ class _KuduzoAppState extends State<KuduzoApp> {
     widget.state.addListener(_onState);
     _mode = _modeOf(widget.state.settings.theme);
     _text = widget.state.settings.textSize;
+    _lang = widget.state.settings.language;
     // На компьютере при закрытии программы выключаем ядро и системный прокси.
     _life = AppLifecycleListener(onExitRequested: () async {
       if (widget.state.isDesktop) await widget.state.shutdown();
@@ -95,6 +98,7 @@ class _KuduzoAppState extends State<KuduzoApp> {
 
   ThemeMode _mode = ThemeMode.system;
   UiSize _text = UiSize.normal;
+  AppLang _lang = AppLang.system;
 
   static ThemeMode _modeOf(ThemePref t) => switch (t) {
         ThemePref.system => ThemeMode.system,
@@ -105,10 +109,11 @@ class _KuduzoAppState extends State<KuduzoApp> {
   void _onState() {
     final st = widget.state.settings;
     final mode = _modeOf(st.theme);
-    if (mode != _mode || st.textSize != _text) {
+    if (mode != _mode || st.textSize != _text || st.language != _lang) {
       setState(() {
         _mode = mode;
         _text = st.textSize;
+        _lang = st.language;
       });
     }
   }
@@ -140,7 +145,8 @@ class _KuduzoAppState extends State<KuduzoApp> {
         builder: (context, child) {
           final dark = Theme.of(context).brightness == Brightness.dark;
           final pal = dark ? K.dark : K.light;
-          if (!identical(K.p, pal)) {
+          final langChanged = L.apply(_lang);
+          if (!identical(K.p, pal) || langChanged) {
             K.p = pal;
             _rebuildAll(context);
           }

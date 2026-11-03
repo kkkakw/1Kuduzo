@@ -1,12 +1,13 @@
 import 'dart:typed_data';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Text;
 
 import '../core/settings.dart';
 import '../core/vpn_backend.dart';
 import '../state/app_state.dart';
 import '../theme.dart';
 import 'widgets.dart';
+import '../i18n.dart';
 
 /// Android: выбор приложений для раздельного туннелирования.
 class AppsScreen extends StatefulWidget {
@@ -75,7 +76,7 @@ class _AppsScreenState extends State<AppsScreen> {
           child: TextField(
             onChanged: (v) => setState(() => query = v.trim().toLowerCase()),
             decoration: InputDecoration(
-              hintText: 'Поиск приложения',
+              hintText: tr('Поиск приложения'),
               prefixIcon: const Icon(Icons.search_rounded),
               filled: true,
               fillColor: K.surface,

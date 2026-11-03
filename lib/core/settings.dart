@@ -1,5 +1,9 @@
 import 'dart:convert';
 
+import '../i18n.dart' show AppLang;
+
+export '../i18n.dart' show AppLang;
+
 enum PingMethod { real, tcp, httpGet, httpHead, icmp }
 
 enum ServerSort { none, ping, name }
@@ -22,6 +26,7 @@ enum PingView { time, bars, both }
 class AppSettings {
   // ---- Интерфейс ----
   ThemePref theme = ThemePref.system;
+  AppLang language = AppLang.system;
   UiSize textSize = UiSize.normal;
   UiSize buttonSize = UiSize.normal;
   bool haptics = true;
@@ -139,6 +144,7 @@ class AppSettings {
 
   Map<String, dynamic> toJson() => {
         'theme': theme.name,
+        'language': language.name,
         'textSize': textSize.name,
         'buttonSize': buttonSize.name,
         'haptics': haptics,
@@ -222,6 +228,7 @@ class AppSettings {
     String t(String k, String d) => j[k] is String && (j[k] as String).isNotEmpty ? j[k] as String : d;
     List<String> l(String k, List<String> d) => j[k] is List ? (j[k] as List).whereType<String>().toList() : d;
     s.theme = _enum(ThemePref.values, j['theme'], s.theme);
+    s.language = _enum(AppLang.values, j['language'], s.language);
     s.textSize = _enum(UiSize.values, j['textSize'], s.textSize);
     s.buttonSize = _enum(UiSize.values, j['buttonSize'], s.buttonSize);
     s.haptics = b('haptics', s.haptics);

@@ -1,6 +1,6 @@
 import 'dart:ui' show FontFeature;
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Text;
 import 'package:flutter/services.dart';
 
 import '../core/server.dart';
@@ -10,6 +10,7 @@ import '../theme.dart';
 import 'add_sheet.dart';
 import 'settings/kit.dart' show confirm;
 import 'widgets.dart';
+import '../i18n.dart';
 
 /// Список подписок и серверов.
 class ServersPanel extends StatelessWidget {
@@ -112,9 +113,9 @@ class _SubHeader extends StatelessWidget {
     if (t == null) return '';
     final d = DateTime.now().difference(t);
     if (d.inMinutes < 1) return 'сейчас';
-    if (d.inHours < 1) return '${d.inMinutes}м';
-    if (d.inDays < 1) return '${d.inHours}ч';
-    return '${d.inDays}д';
+    if (d.inHours < 1) return '${d.inMinutes}${L.pick('м', 'm')}';
+    if (d.inDays < 1) return '${d.inHours}${L.pick('ч', 'h')}';
+    return '${d.inDays}${L.pick('д', 'd')}';
   }
 
   static String _days(int n) {
@@ -215,7 +216,7 @@ class _SubHeader extends StatelessWidget {
           ),
           const SizedBox(width: 2),
           PopupMenuButton<String>(
-            tooltip: 'Действия',
+            tooltip: tr('Действия'),
             color: K.surface,
             icon: Icon(Icons.more_horiz_rounded, color: K.muted),
             onSelected: (v) async {

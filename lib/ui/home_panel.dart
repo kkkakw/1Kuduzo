@@ -1,6 +1,6 @@
 import 'dart:ui' show FontFeature;
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Text;
 
 import '../core/platform.dart';
 import '../core/settings.dart';
@@ -10,6 +10,7 @@ import '../state/app_state.dart';
 import '../theme.dart';
 import '../version.dart';
 import 'widgets.dart';
+import '../i18n.dart';
 
 /// Главный экран: заголовок, тумблер, статус, трафик, текущий сервер, режимы.
 class HomePanel extends StatelessWidget {
@@ -45,13 +46,21 @@ class HomePanel extends StatelessWidget {
       children: [
         if (s.updateVersion != null)
           NoticeBar(
-            text: 'Доступна новая версия ${s.updateVersion}',
-            action: 'Скачать',
-            onAction: () => openUrl(releasesPage),
+            text: s.updateProgress != null
+                ? 'Загрузка версии ${s.updateVersion}: ${(s.updateProgress! * 100).round()}%'
+                : 'Доступна новая версия ${s.updateVersion}',
+            action: s.updateProgress != null ? null : (Plat.windows ? 'Обновить' : 'Скачать'),
+            onAction: () async {
+              if (!Plat.windows) return openUrl(releasesPage);
+              final err = await s.installUpdate();
+              if (err != null && context.mounted) toast(context, err);
+            },
           ),
         if (exp != null)
           NoticeBar(
             warn: true,
+            action: exp.sub.renewUrl.isNotEmpty ? 'Продлить' : null,
+            onAction: () => openUrl(exp.sub.renewUrl),
             text: exp.days < 0
                 ? 'Подписка «${exp.sub.displayTitle}» закончилась'
                 : exp.days == 0

@@ -6,6 +6,7 @@ import 'package:kuduzo/core/country.dart';
 import 'package:kuduzo/core/link_parser.dart';
 import 'package:kuduzo/core/settings.dart';
 import 'package:kuduzo/core/subscription.dart';
+import 'package:kuduzo/i18n.dart';
 import 'package:kuduzo/core/vpn_backend.dart';
 import 'package:kuduzo/core/xray_config.dart';
 
@@ -263,5 +264,20 @@ void main() {
     final cd = Subscription(id: 's2', url: 'https://example.com/2');
     SubscriptionClient.applyMeta(cd, {'content-disposition': "attachment; filename*=UTF-8''%D0%9F%D1%80%D0%BE%D0%B2%D0%B0%D0%B9%D0%B4%D0%B5%D1%80"});
     expect(cd.title, 'Провайдер');
+  });
+
+  test('английский интерфейс: словарь и строки с числами', () {
+    L.apply(AppLang.en);
+    expect(tr('Настройки'), 'Settings');
+    expect(tr('Соединение защищено'), 'Connection protected');
+    expect(tr('Пока пусто.\nДобавьте ссылку на подписку Kuduzo.'), 'Nothing here yet.\nAdd your Kuduzo subscription link.');
+    expect(tr('Осталось 1 день'), '1 day left');
+    expect(tr('Осталось 348 дней'), '348 days left');
+    expect(tr('31,6 ГБ'), '31.6 GB');
+    expect(tr('Подписка обновлена: 2 серв.'), 'Subscription updated: 2 servers');
+    expect(tr('Нет данных: пустой ответ'), 'No data: empty response');
+    expect(tr('Нидерланды'), 'Нидерланды'); // названия серверов не трогаем
+    L.apply(AppLang.ru);
+    expect(tr('Настройки'), 'Настройки');
   });
 }

@@ -71,6 +71,15 @@ class MainActivity : FlutterActivity() {
                 }
                 "stats" -> result.success(KuduzoVpnService.queryStats())
                 "coreVersion" -> result.success(try { Libv2ray.checkVersionX() } catch (e: Throwable) { null })
+                "alwaysOn" -> result.success(KuduzoVpnService.alwaysOnState())
+                "openVpnSettings" -> {
+                    try {
+                        startActivity(Intent(android.provider.Settings.ACTION_VPN_SETTINGS))
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.success(false)
+                    }
+                }
                 "proxyPing" -> {
                     // Пинг через прокси: временное ядро на каждый сервер. Приложение исключено из VPN,
                     // поэтому замер идёт напрямую к серверу.

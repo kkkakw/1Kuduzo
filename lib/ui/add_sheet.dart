@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Text;
 import 'package:flutter/services.dart';
 
 import '../core/platform.dart';
@@ -6,6 +6,7 @@ import '../core/subscription.dart';
 import '../theme.dart';
 import 'qr_screen.dart';
 import 'widgets.dart';
+import '../i18n.dart';
 
 /// Окно добавления: ссылка на подписку или ключи.
 Future<void> showAddSheet(BuildContext context) async {
@@ -68,14 +69,14 @@ Future<void> showAddSheet(BuildContext context) async {
                 autofocus: !looksUseful,
                 style: const TextStyle(fontSize: 14),
                 decoration: InputDecoration(
-                  labelText: 'Ссылка или ключ',
+                  labelText: tr('Ссылка или ключ'),
                   filled: true,
                   fillColor: K.surface,
                   errorText: error,
                   errorMaxLines: 3,
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(18), borderSide: BorderSide.none),
                   suffixIcon: IconButton(
-                    tooltip: 'Вставить',
+                    tooltip: tr('Вставить'),
                     icon: const Icon(Icons.content_paste_rounded),
                     onPressed: () async {
                       final d = await Clipboard.getData(Clipboard.kTextPlain);

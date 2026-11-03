@@ -8,6 +8,7 @@ import 'package:tray_manager/legacy.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../state/app_state.dart';
+import '../i18n.dart';
 
 /// Компьютер: значок в трее, сворачивание вместо закрытия, одна копия программы, ссылки kuduzo://.
 class DesktopShell with TrayListener, WindowListener {
@@ -76,17 +77,17 @@ class DesktopShell with TrayListener, WindowListener {
       _lastOn = on;
       _menu();
       if (Platform.isWindows) {
-        trayManager.setToolTip(on ? 'Kuduzo VPN — подключено' : 'Kuduzo VPN — выключено').catchError((Object _) {});
+        trayManager.setToolTip(tr(on ? 'Kuduzo VPN — подключено' : 'Kuduzo VPN — выключено')).catchError((Object _) {});
       }
     }
   }
 
   Future<void> _menu() => trayManager.setContextMenu(Menu(items: [
-        MenuItem(key: 'show', label: 'Открыть Kuduzo VPN'),
+        MenuItem(key: 'show', label: tr('Открыть Kuduzo VPN')),
         MenuItem.separator(),
-        MenuItem(key: 'toggle', label: (_state?.isOn ?? false) ? 'Выключить VPN' : 'Включить VPN'),
+        MenuItem(key: 'toggle', label: tr((_state?.isOn ?? false) ? 'Выключить VPN' : 'Включить VPN')),
         MenuItem.separator(),
-        MenuItem(key: 'quit', label: 'Выход'),
+        MenuItem(key: 'quit', label: tr('Выход')),
       ]));
 
   Future<void> show() async {

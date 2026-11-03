@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:ui' show FontFeature;
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Text;
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -10,6 +10,7 @@ import '../core/settings.dart';
 import '../core/vpn_backend.dart';
 import '../state/app_state.dart';
 import '../theme.dart';
+import '../i18n.dart';
 
 /// Доступ к AppState из любого виджета.
 class AppScope extends InheritedNotifier<AppState> {
@@ -584,7 +585,7 @@ String pingLabel(int? ms) {
   if (ms == null) return '…';
   if (ms == -2) return 'UDP';
   if (ms < 0) return 'нет связи';
-  return '$ms мс';
+  return L.pick('$ms мс', '$ms ms');
 }
 
 /// Подсказка-снэкбар.
@@ -609,8 +610,8 @@ String statusText(AppState s) {
 
 /// 1536 → «1,5 КБ».
 String fmtBytes(int b) {
-  if (b < 1024) return '$b Б';
-  const units = ['КБ', 'МБ', 'ГБ', 'ТБ'];
+  if (b < 1024) return L.pick('$b Б', '$b B');
+  final units = L.en ? const ['KB', 'MB', 'GB', 'TB'] : const ['КБ', 'МБ', 'ГБ', 'ТБ'];
   var v = b / 1024;
   var i = 0;
   while (v >= 1024 && i < units.length - 1) {
@@ -618,10 +619,10 @@ String fmtBytes(int b) {
     i++;
   }
   final s = v >= 100 ? v.toStringAsFixed(0) : v.toStringAsFixed(1);
-  return '${s.replaceAll('.', ',')} ${units[i]}';
+  return '${L.en ? s : s.replaceAll('.', ',')} ${units[i]}';
 }
 
-String fmtSpeed(int bytesPerSec) => '${fmtBytes(bytesPerSec)}/с';
+String fmtSpeed(int bytesPerSec) => '${fmtBytes(bytesPerSec)}${L.pick('/с', '/s')}';
 
 Future<void> openUrl(String url) async {
   try {
@@ -696,6 +697,6 @@ class RoundIconButton extends StatelessWidget {
         ),
       ),
     );
-    return tooltip == null ? btn : Tooltip(message: tooltip!, child: btn);
+    return tooltip == null ? btn : Tooltip(message: tr(tooltip!), child: btn);
   }
 }

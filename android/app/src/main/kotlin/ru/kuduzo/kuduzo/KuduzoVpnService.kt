@@ -51,6 +51,15 @@ class KuduzoVpnService : VpnService() {
         @Volatile
         private var current: KuduzoVpnService? = null
 
+        private const val PREFS = "kuduzo_vpn"
+
+        /** «Постоянный VPN» и «Блокировать соединения без VPN» (Android 10+, когда VPN работает). */
+        fun alwaysOnState(): Map<String, Boolean>? {
+            val s = current ?: return null
+            if (Build.VERSION.SDK_INT < 29) return null
+            return mapOf("alwaysOn" to s.isAlwaysOn, "lockdown" to s.isLockdownEnabled)
+        }
+
         /** Трафик с прошлого запроса: «proxy,uplink,123;proxy,downlink,456;». */
         fun queryStats(): String = try {
             current?.core?.queryAllOutboundTrafficStats() ?: ""
@@ -74,13 +83,42 @@ class KuduzoVpnService : VpnService() {
                 val name = intent.getStringExtra("name") ?: "Kuduzo"
                 val splitMode = intent.getStringExtra("splitMode") ?: "all"
                 val splitApps = intent.getStringArrayListExtra("splitApps") ?: arrayListOf()
-                val tunnel = try { JSONObject(intent.getStringExtra("tunnel") ?: "{}") } catch (_: Exception) { JSONObject() }
-                showNotification(name)
-                current = this
-                Thread { startVpn(config, splitMode, splitApps, tunnel) }.start()
+                val tunnelText = intent.getStringExtra("tunnel") ?: "{}"
+                // Запоминаем подключение: его возьмёт система, если включён «Постоянный VPN».
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                    .putString("config", config)
+                    .putString("name", name)
+                    .putString("splitMode", splitMode)
+                    .putString("splitApps", JSONArray(splitApps).toString())
+                    .putString("tunnel", tunnelText)
+                    .apply()
+                launch(config, name, splitMode, splitApps, tunnelText)
+            }
+            else -> {
+                // Запуск системой: «Постоянный VPN» в настройках Android или включение из шторки.
+                val p = getSharedPreferences(PREFS, MODE_PRIVATE)
+                val config = p.getString("config", null)
+                if (config.isNullOrEmpty()) {
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
+                val apps = try {
+                    val a = JSONArray(p.getString("splitApps", "[]"))
+                    ArrayList((0 until a.length()).map { a.optString(it) })
+                } catch (_: Exception) { arrayListOf() }
+                launch(config, p.getString("name", null) ?: "Kuduzo", p.getString("splitMode", null) ?: "all",
+                    apps, p.getString("tunnel", null) ?: "{}")
+                return START_STICKY
             }
         }
         return START_NOT_STICKY
+    }
+
+    private fun launch(config: String, name: String, splitMode: String, splitApps: List<String>, tunnelText: String) {
+        val tunnel = try { JSONObject(tunnelText) } catch (_: Exception) { JSONObject() }
+        showNotification(name)
+        current = this
+        Thread { startVpn(config, splitMode, splitApps, tunnel) }.start()
     }
 
     private fun JSONArray?.strings(): List<String> {
