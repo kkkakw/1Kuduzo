@@ -1076,10 +1076,8 @@ class _AboutPageState extends State<AboutPage> {
   @override
   Widget build(BuildContext context) {
     final s = AppScope.of(context);
-    // Ссылки поддержки из заголовков подписки (support-url, profile-web-page-url).
-    final support = s.subscriptions.map((x) => x.supportUrl).firstWhere((u) => u.isNotEmpty, orElse: () => '');
-    final webPage = s.subscriptions.map((x) => x.webPageUrl).firstWhere((u) => u.isNotEmpty, orElse: () => '');
-    final telegram = supportTelegram.isNotEmpty ? supportTelegram : (support.contains('t.me/') ? support : '');
+    // Ссылки провайдеров подписок показываются в их карточках на вкладке «Серверы».
+    const telegram = supportTelegram;
 
     return SettingsPage(title: 'О приложении', children: [
       Padding(
@@ -1131,12 +1129,9 @@ class _AboutPageState extends State<AboutPage> {
           ),
         ),
         _LinkRow(title: 'Сайт', value: 'vpnkuduzo.ru', onTap: () => openUrl('https://vpnkuduzo.ru')),
-        if (webPage.isNotEmpty) _LinkRow(title: 'Моя подписка', value: _short(webPage), onTap: () => openUrl(webPage)),
         if (supportEmail.isNotEmpty)
           _LinkRow(title: 'Email', value: supportEmail, onTap: () => openUrl('mailto:$supportEmail')),
         if (telegram.isNotEmpty) _LinkRow(title: 'Поддержка', value: _short(telegram), onTap: () => openUrl(telegram)),
-        if (support.isNotEmpty && _short(support) != _short(telegram))
-          _LinkRow(title: 'Поддержка подписки', value: _short(support), onTap: () => openUrl(support)),
         if (telegramChannel.isNotEmpty)
           _LinkRow(title: 'Канал', value: _short(telegramChannel), onTap: () => openUrl(telegramChannel)),
       ]),

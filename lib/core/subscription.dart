@@ -20,6 +20,7 @@ class Subscription {
     this.links = const [],
     this.supportUrl = '',
     this.webPageUrl = '',
+    this.announce = '',
   });
 
   final String id;
@@ -37,6 +38,9 @@ class Subscription {
   /// Ссылки из заголовков подписки: поддержка (support-url) и страница профиля (profile-web-page-url).
   String supportUrl;
   String webPageUrl;
+
+  /// Объявление провайдера (заголовок announce), как в Happ и INCY.
+  String announce;
 
   String get displayTitle {
     if (title.isNotEmpty) return title;
@@ -56,6 +60,7 @@ class Subscription {
         'links': links,
         'supportUrl': supportUrl,
         'webPageUrl': webPageUrl,
+        'announce': announce,
       };
 
   factory Subscription.fromJson(Map<String, dynamic> j) => Subscription(
@@ -70,6 +75,7 @@ class Subscription {
         links: ((j['links'] ?? const []) as List).cast<String>(),
         supportUrl: (j['supportUrl'] ?? '') as String,
         webPageUrl: (j['webPageUrl'] ?? '') as String,
+        announce: (j['announce'] ?? '') as String,
       );
 
   List<ServerConfig> get servers => LinkParser.parseMany(links.join('\n'), subscriptionId: id);
@@ -166,6 +172,11 @@ class SubscriptionClient {
 
     sub.supportUrl = link('support-url') ?? sub.supportUrl;
     sub.webPageUrl = link('profile-web-page-url') ?? sub.webPageUrl;
+    final a = h['announce'];
+    if (a != null) {
+      final text = a.startsWith('base64:') ? (LinkParser.tryBase64(a.substring(7)) ?? '') : a;
+      sub.announce = text.trim().length > 400 ? '${text.trim().substring(0, 400)}…' : text.trim();
+    }
     final t = h['profile-title'];
     if (t != null && t.isNotEmpty) {
       if (t.startsWith('base64:')) {

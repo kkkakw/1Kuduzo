@@ -1,10 +1,14 @@
+import 'dart:ui' show FontFeature;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../core/server.dart';
 import '../core/subscription.dart';
 import '../state/app_state.dart';
 import '../theme.dart';
 import 'add_sheet.dart';
+import 'settings/kit.dart' show confirm;
 import 'widgets.dart';
 
 /// Список подписок и серверов.
@@ -96,73 +100,232 @@ class ServersPanel extends StatelessWidget {
   }
 }
 
+/// Карточка подписки как в INCY: срок и трафик, объявление провайдера, его ссылки,
+/// кнопки обновления и пинга, время обновления и число серверов.
 class _SubHeader extends StatelessWidget {
   const _SubHeader({required this.sub});
   final Subscription sub;
 
+  static String _two(int v) => v.toString().padLeft(2, '0');
+
+  static String _age(DateTime? t) {
+    if (t == null) return '';
+    final d = DateTime.now().difference(t);
+    if (d.inMinutes < 1) return 'сейчас';
+    if (d.inHours < 1) return '${d.inMinutes}м';
+    if (d.inDays < 1) return '${d.inHours}ч';
+    return '${d.inDays}д';
+  }
+
+  static String _days(int n) {
+    final m10 = n % 10, m100 = n % 100;
+    final w = m10 == 1 && m100 != 11
+        ? 'день'
+        : (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14))
+            ? 'дня'
+            : 'дней';
+    return '$n $w';
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = AppScope.of(context);
-    final parts = <String>[];
-    if (sub.expire != null) {
-      final e = sub.expire!;
-      parts.add('до ${e.day.toString().padLeft(2, '0')}.${e.month.toString().padLeft(2, '0')}.${e.year}');
-    }
-    if (sub.total > 0) {
-      parts.add('${fmtBytes(sub.upload + sub.download)} из ${fmtBytes(sub.total)}');
-    }
-    if (sub.updatedAt != null) {
-      final m = DateTime.now().difference(sub.updatedAt!).inMinutes;
-      parts.add(m < 1 ? 'обновлена только что' : m < 60 ? 'обновлена $m мин назад' : 'обновлена ${m ~/ 60} ч назад');
-    }
     final collapsible = s.settings.collapseSubs;
     final collapsed = s.collapsed.contains(sub.id);
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: collapsible
-          ? () {
-              haptic(context);
-              s.toggleCollapsed(sub.id);
-            }
-          : null,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4),
-        child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
-          if (collapsible)
-            AnimatedRotation(
-              turns: collapsed ? -0.25 : 0,
-              duration: kFast,
-              child: Icon(Icons.expand_more_rounded, color: K.muted),
-            ),
+    final refreshing = s.refreshingSubs.contains(sub.id);
+    final count = s.servers.where((x) => x.subscriptionId == sub.id).length;
+
+    // Срок: «Осталось N дней», «Истекла» или «Бессрочно».
+    String term;
+    var expired = false;
+    if (sub.expire == null) {
+      term = 'Бессрочно';
+    } else {
+      final left = sub.expire!.difference(DateTime.now());
+      expired = left.isNegative;
+      term = expired ? 'Истекла' : 'Осталось ${_days((left.inHours / 24).ceil())}';
+    }
+    final used = sub.upload + sub.download;
+    final share = sub.total > 0 ? (used / sub.total).clamp(0.0, 1.0) : 0.0;
+    final traffic = '${fmtBytes(used)} / ${sub.total > 0 ? fmtBytes(sub.total) : '∞'}';
+
+    final web = sub.webPageUrl;
+    final support = sub.supportUrl;
+    final updated = sub.updatedAt;
+
+    return KCard(
+      padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
           Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(
-                '${sub.displayTitle}${collapsed ? ' · ${sub.links.length}' : ''}',
-                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
-              ),
-              if (parts.isNotEmpty) Text(parts.join(' · '), style: TextStyle(fontSize: 12, color: K.muted)),
-            ]),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: collapsible
+                  ? () {
+                      haptic(context);
+                      s.toggleCollapsed(sub.id);
+                    }
+                  : null,
+              child: Row(children: [
+                if (collapsible) ...[
+                  AnimatedRotation(
+                    turns: collapsed ? -0.25 : 0,
+                    duration: kFast,
+                    child: Icon(Icons.expand_more_rounded, color: K.muted),
+                  ),
+                  const SizedBox(width: 4),
+                ],
+                Flexible(
+                  child: Text(
+                    sub.displayTitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ]),
+            ),
           ),
+          if (updated != null)
+            Padding(
+              padding: const EdgeInsets.only(left: 6, right: 8),
+              child: Text(_age(updated), style: TextStyle(fontSize: 13, color: K.muted)),
+            ),
+          RoundIconButton(
+            icon: Icons.refresh_rounded,
+            tooltip: 'Обновить подписку',
+            size: 38,
+            spinning: refreshing,
+            onTap: () async {
+              final err = await s.refreshOne(sub);
+              if (context.mounted) toast(context, err ?? 'Подписка обновлена');
+            },
+          ),
+          const SizedBox(width: 8),
+          RoundIconButton(
+            icon: Icons.bolt_rounded,
+            tooltip: 'Пинг серверов подписки',
+            size: 38,
+            spinning: s.pinging,
+            onTap: () => s.pingAll(only: s.servers.where((x) => x.subscriptionId == sub.id).toList()),
+          ),
+          const SizedBox(width: 2),
           PopupMenuButton<String>(
             tooltip: 'Действия',
             color: K.surface,
             icon: Icon(Icons.more_horiz_rounded, color: K.muted),
             onSelected: (v) async {
-              if (v == 'del') await s.removeSubscription(sub.id);
-              if (v == 'upd') {
-                final err = await s.refreshAll();
-                if (context.mounted) toast(context, err ?? 'Подписка обновлена');
+              if (v == 'copy') {
+                await Clipboard.setData(ClipboardData(text: sub.url));
+                if (context.mounted) toast(context, 'Ссылка подписки скопирована');
+              }
+              if (v == 'del' &&
+                  context.mounted &&
+                  await confirm(context, 'Удалить подписку?', '«${sub.displayTitle}» и её серверы пропадут из списка.',
+                      ok: 'Удалить', danger: true)) {
+                await s.removeSubscription(sub.id);
               }
             },
             itemBuilder: (_) => const [
-              PopupMenuItem(value: 'upd', child: Text('Обновить')),
+              PopupMenuItem(value: 'copy', child: Text('Скопировать ссылку')),
               PopupMenuItem(value: 'del', child: Text('Удалить подписку')),
             ],
           ),
         ]),
-      ),
+        const SizedBox(height: 10),
+        Row(children: [
+          Text(term,
+              style: TextStyle(fontSize: 13, color: expired ? K.bad : K.text2, fontWeight: FontWeight.w500)),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Text('|', style: TextStyle(fontSize: 13, color: K.line)),
+          ),
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: TweenAnimationBuilder<double>(
+                tween: Tween(end: share),
+                duration: kMedium,
+                curve: Curves.easeOutCubic,
+                builder: (_, v, __) => LinearProgressIndicator(
+                  value: v,
+                  minHeight: 6,
+                  backgroundColor: K.chip,
+                  color: share > 0.9 ? K.bad : K.accent,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Text(traffic,
+              style: TextStyle(
+                fontSize: 13,
+                color: K.text2,
+                fontWeight: FontWeight.w500,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              )),
+        ]),
+        if (sub.announce.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          Text(sub.announce, style: TextStyle(fontSize: 14, color: K.text2, height: 1.35)),
+        ],
+        if (web.isNotEmpty || support.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            if (web.isNotEmpty)
+              _LinkChip(
+                icon: web.contains('t.me/') ? Icons.campaign_rounded : Icons.public_rounded,
+                label: web.contains('t.me/') ? 'Канал / Бот' : 'Сайт',
+                onTap: () => openUrl(web),
+              ),
+            if (support.isNotEmpty)
+              _LinkChip(icon: Icons.help_outline_rounded, label: 'Поддержка', onTap: () => openUrl(support)),
+          ]),
+        ],
+        if (updated != null) ...[
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerRight,
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Text(
+                '${_two(updated.day)}.${_two(updated.month)}.${_two(updated.year % 100)}, '
+                '${_two(updated.hour)}:${_two(updated.minute)} · $count',
+                style: TextStyle(fontSize: 12, color: K.muted, fontFeatures: const [FontFeature.tabularFigures()]),
+              ),
+              const SizedBox(width: 4),
+              Icon(Icons.dns_outlined, size: 14, color: K.muted),
+            ]),
+          ),
+        ],
+      ]),
     );
   }
+}
+
+/// Кнопка-ссылка провайдера подписки.
+class _LinkChip extends StatelessWidget {
+  const _LinkChip({required this.icon, required this.label, required this.onTap});
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Pressable(
+        onTap: () {
+          haptic(context);
+          onTap();
+        },
+        scale: 0.95,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(color: K.chip, borderRadius: BorderRadius.circular(14)),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 18, color: K.accent),
+            const SizedBox(width: 8),
+            Text(label, style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600, color: K.ink)),
+          ]),
+        ),
+      );
 }
 
 class _ServerList extends StatelessWidget {

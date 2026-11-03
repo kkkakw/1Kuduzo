@@ -662,11 +662,13 @@ class NoticeBar extends StatelessWidget {
 
 /// Круглая кнопка с иконкой (обновить, назад, меню).
 class RoundIconButton extends StatelessWidget {
-  const RoundIconButton({super.key, required this.icon, required this.onTap, this.tooltip, this.spinning = false});
+  const RoundIconButton(
+      {super.key, required this.icon, required this.onTap, this.tooltip, this.spinning = false, this.size = 44});
   final IconData icon;
   final VoidCallback? onTap;
   final String? tooltip;
   final bool spinning;
+  final double size;
 
   @override
   Widget build(BuildContext context) {
@@ -679,18 +681,18 @@ class RoundIconButton extends StatelessWidget {
             },
       scale: 0.9,
       child: Container(
-        width: 44,
-        height: 44,
+        width: size,
+        height: size,
         decoration: BoxDecoration(color: K.chip, shape: BoxShape.circle),
         child: AnimatedSwitcher(
           duration: kFast,
           child: spinning
               ? Padding(
                   key: const ValueKey('spin'),
-                  padding: const EdgeInsets.all(13),
+                  padding: EdgeInsets.all(size * 0.3),
                   child: CircularProgressIndicator(strokeWidth: 2, color: K.ink),
                 )
-              : Icon(icon, key: const ValueKey('icon'), size: 20, color: K.ink),
+              : Icon(icon, key: const ValueKey('icon'), size: size * 0.45, color: K.ink),
         ),
       ),
     );

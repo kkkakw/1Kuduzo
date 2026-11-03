@@ -566,6 +566,33 @@ class AppState extends ChangeNotifier {
     return error;
   }
 
+  /// Подписки, которые сейчас обновляются (крутится кнопка в карточке).
+  final Set<String> refreshingSubs = {};
+
+  /// Обновить одну подписку. Возвращает текст ошибки или null.
+  Future<String?> refreshOne(Subscription sub) async {
+    if (!refreshingSubs.add(sub.id)) return null;
+    notifyListeners();
+    String? error;
+    try {
+      await SubscriptionClient.refresh(sub,
+          deviceId: settings.sendHwid ? deviceId : null,
+          agent: settings.userAgent,
+          timeoutSec: settings.subTimeoutSec);
+    } on SubscriptionException catch (e) {
+      error = e.message;
+    } finally {
+      refreshingSubs.remove(sub.id);
+    }
+    _rebuildServers();
+    await _save();
+    notifyListeners();
+    if (error == null && settings.pingAfterUpdate) {
+      unawaited(pingAll(only: servers.where((x) => x.subscriptionId == sub.id).toList()));
+    }
+    return error;
+  }
+
   Future<void> removeSubscription(String id) async {
     subscriptions.removeWhere((s) => s.id == id);
     _rebuildServers();
@@ -682,15 +709,23 @@ class AppState extends ChangeNotifier {
 
   // ---------- пинг ----------
 
-  Future<void> pingAll() async {
-    if (pinging || servers.isEmpty) return;
+  /// Пинг всех серверов или только [only] (например, одной подписки).
+  Future<void> pingAll({List<ServerConfig>? only}) async {
+    final list = only ?? servers;
+    if (pinging || list.isEmpty) return;
     pinging = true;
-    pings.clear();
+    if (only == null) {
+      pings.clear();
+    } else {
+      for (final x in only) {
+        pings.remove(x.id);
+      }
+    }
     notifyListeners();
     try {
       final b = _backend;
       await Pinger.pingAll(
-        servers,
+        list,
         settings,
         mobile: b is MobileVpnBackend ? b : null,
         tunnelOn: Plat.ios && state == VpnState.connected,
