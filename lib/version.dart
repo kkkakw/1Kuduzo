@@ -1,6 +1,6 @@
 /// Версия приложения (совпадает с pubspec.yaml).
-const appVersion = '0.4.6';
-const appBuild = 10;
+const appVersion = '0.4.7';
+const appBuild = 11;
 
 /// Откуда брать обновления.
 const releasesPage = 'https://github.com/kkkakw/1Kuduzo/releases/latest';
