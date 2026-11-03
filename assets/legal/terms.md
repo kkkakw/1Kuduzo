@@ -80,5 +80,5 @@
 - Поддержка в Telegram: t.me/kuduzohelpbot
 - Новости: t.me/kuduzovpn
 - Сайт: vpnkuduzo.ru
-- Email: [__________]
+- Email: kuduzovpn@bk.ru
 - Адрес: [__________]
