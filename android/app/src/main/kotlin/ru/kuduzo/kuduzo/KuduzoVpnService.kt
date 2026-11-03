@@ -19,6 +19,8 @@ import libv2ray.CoreController
 import libv2ray.Libv2ray
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
+import java.io.FileOutputStream
 import java.net.InetAddress
 
 /**
@@ -121,6 +123,37 @@ class KuduzoVpnService : VpnService() {
         Thread { startVpn(config, splitMode, splitApps, tunnel) }.start()
     }
 
+    /**
+     * Базы geoip.dat и geosite.dat лежат внутри APK (assets), а ядро ищет их в папке приложения.
+     * Копируем при первом запуске и после каждого обновления приложения.
+     */
+    private fun ensureGeoFiles() {
+        val stamp = try {
+            packageManager.getPackageInfo(packageName, 0).lastUpdateTime
+        } catch (_: Exception) {
+            0L
+        }
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val fresh = prefs.getLong("geoStamp", -1L) == stamp
+        var ok = true
+        for (name in listOf("geoip.dat", "geosite.dat")) {
+            val out = File(filesDir, name)
+            if (fresh && out.isFile && out.length() > 0) continue
+            try {
+                val tmp = File(filesDir, "$name.tmp")
+                assets.open(name).use { input -> FileOutputStream(tmp).use { input.copyTo(it, 1 shl 16) } }
+                if (!tmp.renameTo(out)) {
+                    out.delete()
+                    tmp.renameTo(out)
+                }
+            } catch (e: Exception) {
+                ok = false
+                Log.w(TAG, "не удалось подготовить $name: ${e.message}")
+            }
+        }
+        if (ok) prefs.edit().putLong("geoStamp", stamp).apply()
+    }
+
     private fun JSONArray?.strings(): List<String> {
         if (this == null) return emptyList()
         return (0 until length()).map { optString(it).trim() }.filter { it.isNotEmpty() }
@@ -140,6 +173,7 @@ class KuduzoVpnService : VpnService() {
             stopCore()
             emit("connecting")
             try {
+                ensureGeoFiles()
                 Libv2ray.initCoreEnv(filesDir.absolutePath, "")
 
                 val mtu = tunnel.optInt("mtu", 1500)
