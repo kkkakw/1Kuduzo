@@ -75,11 +75,28 @@ class LinkParser {
 
   // ---------- общие помощники ----------
 
+  /// Раскодирует %XX. Работает и со смешанным текстом («Осталось%2030%20дней»),
+  /// на котором Uri.decodeComponent падает.
   static String _dec(String s) {
+    if (!s.contains('%')) return s;
     try {
       return Uri.decodeComponent(s);
     } catch (_) {
-      return s;
+      final src = utf8.encode(s);
+      final out = <int>[];
+      for (var i = 0; i < src.length; i++) {
+        final c = src[i];
+        if (c == 0x25 && i + 2 < src.length) {
+          final v = int.tryParse(String.fromCharCodes(src.sublist(i + 1, i + 3)), radix: 16);
+          if (v != null) {
+            out.add(v);
+            i += 2;
+            continue;
+          }
+        }
+        out.add(c);
+      }
+      return utf8.decode(out, allowMalformed: true);
     }
   }
 
