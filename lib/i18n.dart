@@ -501,6 +501,10 @@ const Map<String, String> _en = {
   'сек': 'sec',
   'файл скачался не полностью': 'the file didn\'t download completely',
   'Язык': 'Language',
+  'Сайт проверки IP показывает российский адрес': 'An IP check site shows a Russian address',
+  'В режиме «Зарубежные сайты» российские сайты (2ip.ru, yandex.ru) открываются напрямую — так и задумано. Проверяйте на зарубежном сайте, например ifconfig.me, или включите «Весь трафик». На компьютере браузер должен быть настроен на системный прокси; если программа его не видит — включите режим TUN.':
+      'In “Foreign sites” mode, Russian sites (2ip.ru, yandex.ru) open directly — this is by design. Check on a foreign site such as ifconfig.me, or switch to “All traffic”. On a computer the browser must use the system proxy; if an app ignores it, turn on TUN mode.',
+  'Windows не применила настройки прокси': 'Windows did not apply the proxy settings',
   'Документ доступен только на русском языке.': 'This document is available in Russian only.',
   'Сайт vpnkuduzo.ru': 'Website vpnkuduzo.ru',
 };
