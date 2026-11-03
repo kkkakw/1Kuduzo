@@ -9,8 +9,11 @@ Pod::Spec.new do |s|
   s.source           = { :path => '.' }
   s.source_files     = 'Classes/**/*'
   s.dependency 'Flutter'
-  s.platform         = :ios, '13.0'
+  s.platform         = :ios, '15.0'
   s.frameworks       = 'NetworkExtension'
+  # Ядро Xray (gomobile) — его же использует расширение VPN. Сборка кладёт его сюда (см. build.yml).
+  s.vendored_frameworks = 'Kuduzocore.xcframework'
+  s.libraries        = 'resolv'
   s.swift_version    = '5.0'
   s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES' }
 end

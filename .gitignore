@@ -10,3 +10,4 @@ android/app/src/main/assets/*.dat
 *.iml
 .idea/
 .vscode/
+packages/kuduzo_vpn_ios/ios/Kuduzocore.xcframework/

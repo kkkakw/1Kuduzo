@@ -209,4 +209,14 @@ void main() {
     expect(flagAsset('zz'), isNull);
     expect(File('assets/flags/nl.png').existsSync(), isTrue);
   });
+
+  test('пинг через прокси: конфиг одного сервера и разбор ответа ядра', () {
+    final srv = LinkParser.parse(vlessReality)!;
+    final cfg = XrayConfigBuilder.forSingleDelay(srv, AppSettings());
+    final outs = cfg['outbounds'] as List;
+    expect((outs.first as Map)['tag'], 'proxy');
+    expect(cfg.containsKey('inbounds'), isFalse);
+    final r = MobileVpnBackend.parsePingReply('a1 120\nb2 -1\nмусор\n');
+    expect(r, {'a1': 120, 'b2': -1});
+  });
 }

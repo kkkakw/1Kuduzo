@@ -15,24 +15,25 @@ import 'xray_config.dart';
 class Pinger {
   static bool get _desktop => Plat.desktop;
 
-  /// Какие методы доступны на этой платформе. На iPhone приложение не может запускать команду ping.
+  /// Какие методы доступны на этой платформе. На телефоне — как в Happ: через прокси (GET/HEAD), TCP, ICMP.
   static List<PingMethod> get available => _desktop
       ? PingMethod.values
-      : Plat.ios
-          ? const [PingMethod.tcp]
-          : const [PingMethod.tcp, PingMethod.icmp];
+      : const [PingMethod.httpGet, PingMethod.httpHead, PingMethod.tcp, PingMethod.icmp];
 
-  /// [tunnel] — включённый VPN на iPhone: тогда замер делает расширение VPN, иначе туннель
-  /// перехватит соединение и ответит сам за 1–2 мс.
+  /// Метод по умолчанию, если выбранный здесь недоступен.
+  static PingMethod effective(PingMethod m) => available.contains(m) ? m : (_desktop ? PingMethod.real : PingMethod.httpGet);
+
+  /// [mobile] — бэкенд телефона. [tunnelOn] — VPN на iPhone включён: тогда замер делает расширение VPN,
+  /// иначе туннель перехватит соединение и ответит сам за 1–2 мс.
   static Future<Map<String, int>> pingAll(
     List<ServerConfig> servers,
     AppSettings st, {
     void Function(String id, int ms)? onResult,
-    MobileVpnBackend? tunnel,
+    MobileVpnBackend? mobile,
+    bool tunnelOn = false,
   }) async {
     if (Plat.web) return _demo(servers, onResult);
-    var method = st.pingMethod;
-    if (!available.contains(method)) method = PingMethod.tcp;
+    final method = effective(st.pingMethod);
     final timeout = Duration(seconds: st.pingTimeoutSec.clamp(1, 30).toInt());
     final out = <String, int>{};
     void put(String id, int ms) {
@@ -40,20 +41,35 @@ class Pinger {
       onResult?.call(id, ms);
     }
 
-    if (tunnel != null && Plat.ios) {
-      for (final s in servers.where((s) => s.protocol == 'hysteria2')) {
-        put(s.id, -2); // UDP — TCP-пингом не измерить
-      }
-      final tcpServers = servers.where((s) => s.protocol != 'hysteria2').toList();
-      // Порциями по 8, чтобы числа появлялись постепенно.
-      for (var i = 0; i < tcpServers.length; i += 8) {
-        final part = tcpServers.sublist(i, min(i + 8, tcpServers.length));
-        final r = await tunnel.pingInTunnel(part, timeout);
-        for (final s in part) {
-          put(s.id, r?[s.id] ?? -1);
+    if (mobile != null && !_desktop) {
+      final proxy = method == PingMethod.httpGet || method == PingMethod.httpHead;
+      final kind = proxy ? 'proxy' : (method == PingMethod.icmp ? 'icmp' : 'ping');
+      final viaCore = Plat.ios && (tunnelOn || kind != 'ping');
+      if (viaCore || (Plat.android && proxy)) {
+        // UDP-протоколы TCP- и ICMP-пинг не покажут, а прокси-пинг для них работает.
+        final measurable = servers.where((s) => proxy || s.protocol != 'hysteria2').toList();
+        for (final s in servers.where((s) => !measurable.contains(s))) {
+          put(s.id, -2);
         }
+        // Порциями — числа появляются постепенно.
+        final step = proxy ? 4 : 8;
+        final httpMethod = method == PingMethod.httpHead ? 'HEAD' : 'GET';
+        for (var i = 0; i < measurable.length; i += step) {
+          final part = measurable.sublist(i, min(i + step, measurable.length));
+          final Map<String, int>? r;
+          if (Plat.android) {
+            r = await mobile.proxyPingAndroid(part, st, st.testUrl);
+          } else if (tunnelOn) {
+            r = await mobile.pingInTunnel(kind, part, timeout, settings: st, method: httpMethod, url: st.testUrl);
+          } else {
+            r = await mobile.pingInApp(kind, part, timeout, settings: st, method: httpMethod, url: st.testUrl);
+          }
+          for (final s in part) {
+            put(s.id, r?[s.id] ?? -1);
+          }
+        }
+        return out;
       }
-      return out;
     }
 
     switch (method) {

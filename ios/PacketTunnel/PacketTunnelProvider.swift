@@ -58,6 +58,13 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
       KuduzocoreSetMemoryLimit(max(20, min(50, memoryLimit)))
       var err: NSError?
       KuduzocoreStart(json, Int(fd), Bundle.main.resourcePath ?? "", &err)
+      if err == nil,
+         let port = (value("ctlPort") as? NSNumber)?.intValue, port > 0,
+         let token = value("ctlToken") as? String, !token.isEmpty {
+        // Запасной канал к приложению через 127.0.0.1: сообщения iOS доходят не при любой подписи.
+        var ctlErr: NSError?
+        KuduzocoreServeControl(port, token, &ctlErr)
+      }
       completionHandler(err)
     }
   }
@@ -68,29 +75,13 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     completionHandler()
   }
 
-  /// Сообщения от приложения: «stats» → «отправлено,получено,память», «logs» → журнал ядра, «ping…» → пинг серверов.
+  /// Сообщения от приложения (stats, logs, ping, icmp, proxy) — разбирает ядро, см. HandleMessage.
+  /// Долгие команды (пинг) выполняются не в очереди расширения, чтобы не задерживать остальные.
   override func handleAppMessage(_ messageData: Data, completionHandler: ((Data?) -> Void)?) {
     let command = String(data: messageData, encoding: .utf8) ?? ""
-    switch command {
-    case "stats":
-      let traffic = KuduzocoreQueryTraffic()
-      let memory = KuduzocoreMemoryUsage()
-      completionHandler?("\(traffic),\(memory)".data(using: .utf8))
-    case "logs":
-      completionHandler?(KuduzocoreLogs().data(using: .utf8))
-    default:
-      // «ping\n<тайм-аут мс>\n<id адрес порт>…» — замер идёт отсюда, мимо туннеля.
-      if command.hasPrefix("ping\n") {
-        let parts = command.split(separator: "\n", maxSplits: 2, omittingEmptySubsequences: false)
-        let timeout = parts.count > 1 ? Int(parts[1]) ?? 3000 : 3000
-        let list = parts.count > 2 ? String(parts[2]) : ""
-        DispatchQueue.global(qos: .userInitiated).async {
-          let reply = KuduzocorePingTCP(list, timeout)
-          completionHandler?(reply.data(using: .utf8))
-        }
-      } else {
-        completionHandler?(nil)
-      }
+    DispatchQueue.global(qos: .userInitiated).async {
+      let reply = KuduzocoreHandleMessage(command)
+      completionHandler?(reply.data(using: .utf8))
     }
   }
 

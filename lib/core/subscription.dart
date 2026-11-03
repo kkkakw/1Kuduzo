@@ -18,6 +18,8 @@ class Subscription {
     this.expire,
     this.updatedAt,
     this.links = const [],
+    this.supportUrl = '',
+    this.webPageUrl = '',
   });
 
   final String id;
@@ -31,6 +33,10 @@ class Subscription {
 
   /// Последний полученный список ключей (кэш на случай, когда сервер подписок недоступен).
   List<String> links;
+
+  /// Ссылки из заголовков подписки: поддержка (support-url) и страница профиля (profile-web-page-url).
+  String supportUrl;
+  String webPageUrl;
 
   String get displayTitle {
     if (title.isNotEmpty) return title;
@@ -48,6 +54,8 @@ class Subscription {
         'expire': expire?.millisecondsSinceEpoch,
         'updatedAt': updatedAt?.millisecondsSinceEpoch,
         'links': links,
+        'supportUrl': supportUrl,
+        'webPageUrl': webPageUrl,
       };
 
   factory Subscription.fromJson(Map<String, dynamic> j) => Subscription(
@@ -60,6 +68,8 @@ class Subscription {
         expire: j['expire'] == null ? null : DateTime.fromMillisecondsSinceEpoch(j['expire'] as int),
         updatedAt: j['updatedAt'] == null ? null : DateTime.fromMillisecondsSinceEpoch(j['updatedAt'] as int),
         links: ((j['links'] ?? const []) as List).cast<String>(),
+        supportUrl: (j['supportUrl'] ?? '') as String,
+        webPageUrl: (j['webPageUrl'] ?? '') as String,
       );
 
   List<ServerConfig> get servers => LinkParser.parseMany(links.join('\n'), subscriptionId: id);
@@ -148,6 +158,14 @@ class SubscriptionClient {
         }
       }
     }
+    String? link(String key) {
+      final v = h[key]?.trim();
+      final u = v == null ? null : Uri.tryParse(v);
+      return u != null && (u.scheme == 'https' || u.scheme == 'http' || u.scheme == 'tg') ? v : null;
+    }
+
+    sub.supportUrl = link('support-url') ?? sub.supportUrl;
+    sub.webPageUrl = link('profile-web-page-url') ?? sub.webPageUrl;
     final t = h['profile-title'];
     if (t != null && t.isNotEmpty) {
       if (t.startsWith('base64:')) {

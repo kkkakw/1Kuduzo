@@ -692,7 +692,8 @@ class AppState extends ChangeNotifier {
       await Pinger.pingAll(
         servers,
         settings,
-        tunnel: Plat.ios && state == VpnState.connected && b is MobileVpnBackend ? b : null,
+        mobile: b is MobileVpnBackend ? b : null,
+        tunnelOn: Plat.ios && state == VpnState.connected,
         onResult: (id, ms) {
           pings[id] = ms;
           notifyListeners();

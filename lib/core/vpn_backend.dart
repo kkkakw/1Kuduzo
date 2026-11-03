@@ -6,6 +6,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'platform.dart';
 import 'server.dart';
@@ -114,9 +115,12 @@ class MobileVpnBackend implements VpnBackend {
     _ctrl.add(const VpnStatus(VpnState.connecting));
     _prevUp = _prevDown = null;
     _statsError = null;
+    final ctl = Plat.ios ? await _newCtl() : null;
     await _ch.invokeMethod('start', {
       'config': jsonEncode(config),
       'name': server.name,
+      if (ctl != null) 'ctlPort': ctl.port,
+      if (ctl != null) 'ctlToken': ctl.token,
       'splitMode': st.splitMode.name,
       'splitApps': st.splitApps,
       ...tunnelOptions(st),
@@ -175,42 +179,117 @@ class MobileVpnBackend implements VpnBackend {
     if (_diag.length > 100) _diag.removeRange(0, _diag.length - 100);
   }
 
+  // ---------- iPhone: связь с расширением VPN ----------
+
+  /// Секретный ключ и порт локального канала 127.0.0.1 к расширению (новые при каждом подключении).
+  ({int port, String token})? _ctl;
+
+  Future<({int port, String token})?> _ctlInfo() async {
+    if (_ctl != null) return _ctl;
+    try {
+      final p = await SharedPreferences.getInstance();
+      final port = p.getInt('ctlPort');
+      final token = p.getString('ctlToken');
+      if (port != null && token != null) _ctl = (port: port, token: token);
+    } catch (_) {}
+    return _ctl;
+  }
+
+  Future<({int port, String token})> _newCtl() async {
+    final r = Random.secure();
+    final token = List.generate(32, (_) => r.nextInt(16).toRadixString(16)).join();
+    final c = (port: 20000 + r.nextInt(40000), token: token);
+    _ctl = c;
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setInt('ctlPort', c.port);
+      await p.setString('ctlToken', c.token);
+    } catch (_) {}
+    return c;
+  }
+
+  String? _ctlError, _ipcError;
+
+  /// Команда расширению VPN: сначала локальный канал 127.0.0.1, потом сообщение iOS.
+  /// null — не ответил ни один путь (причины — в [tunnelError]).
+  Future<String?> tunnelCall(String msg, {Duration timeout = const Duration(seconds: 4)}) async {
+    final c = await _ctlInfo();
+    if (c != null) {
+      Socket? sock;
+      try {
+        sock = await Socket.connect(InternetAddress.loopbackIPv4, c.port, timeout: const Duration(seconds: 2));
+        sock.add(utf8.encode('${c.token}\n$msg\n<<end>>\n'));
+        await sock.flush();
+        final bytes = <int>[];
+        await for (final chunk in sock.timeout(timeout)) {
+          bytes.addAll(chunk);
+        }
+        final reply = utf8.decode(bytes, allowMalformed: true);
+        if (reply.isNotEmpty) {
+          _ctlError = null;
+          return reply;
+        }
+        _ctlError = 'пустой ответ';
+      } on TimeoutException {
+        _ctlError = 'нет ответа за ${timeout.inSeconds} с';
+      } catch (e) {
+        _ctlError = e is SocketException ? (e.osError?.message ?? e.message) : '$e';
+      } finally {
+        sock?.destroy();
+      }
+    } else {
+      _ctlError = 'переподключите VPN';
+    }
+    try {
+      final reply = await _ch.invokeMethod<String>('message', {'text': msg}).timeout(timeout);
+      if (reply != null && reply.isNotEmpty && !reply.startsWith('err:')) {
+        _ipcError = null;
+        return reply;
+      }
+      _ipcError = reply == null || reply.isEmpty ? 'пустой ответ' : reply.substring(4);
+    } on TimeoutException {
+      _ipcError = 'нет ответа за ${timeout.inSeconds} с';
+    } catch (e) {
+      _ipcError = '$e';
+    }
+    return null;
+  }
+
+  /// Почему расширение VPN не ответило.
+  String get tunnelError => 'нет связи с расширением VPN (127.0.0.1: ${_ctlError ?? '—'}; iOS: ${_ipcError ?? '—'})';
+
   @override
   Future<({int up, int down})?> trafficDelta() async {
-    try {
-      final s = (await _ch.invokeMethod<String>('stats').timeout(const Duration(seconds: 4)) ?? '').trim();
-      if (Plat.ios) {
-        if (s.startsWith('err:')) {
-          _setStatsError(s.substring(4));
-          return null;
-        }
-        // Расширение VPN отвечает «отправлено,получено,память» — итог с момента подключения.
-        final f = s.split(',');
-        final up = f.isNotEmpty ? int.tryParse(f[0].trim()) : null;
-        final down = f.length > 1 ? int.tryParse(f[1].trim()) : null;
-        if (up == null || down == null) {
-          _setStatsError(s.isEmpty ? 'расширение VPN не ответило' : 'непонятный ответ «$s»');
-          return null;
-        }
-        _setStatsError(null);
-        if (f.length >= 3) _memoryBytes = int.tryParse(f[2].trim());
-        final pu = _prevUp, pd = _prevDown;
-        _prevUp = up;
-        _prevDown = down;
-        // Первый ответ (или ядро перезапустилось) — весь трафик сессии, дальше — прирост.
-        return (
-          up: pu == null || up < pu ? up : up - pu,
-          down: pd == null || down < pd ? down : down - pd,
-        );
+    if (!Plat.ios) {
+      try {
+        return parseLibStats(await _ch.invokeMethod<String>('stats').timeout(const Duration(seconds: 4)) ?? '');
+      } catch (_) {
+        return null;
       }
-      return parseLibStats(s);
-    } on TimeoutException {
-      _setStatsError('расширение VPN не ответило за 4 с');
-      return null;
-    } catch (e) {
-      _setStatsError('$e');
+    }
+    final s = (await tunnelCall('stats'))?.trim();
+    if (s == null) {
+      _setStatsError(tunnelError);
       return null;
     }
+    // Расширение VPN отвечает «отправлено,получено,память» — итог с момента подключения.
+    final f = s.split(',');
+    final up = f.isNotEmpty ? int.tryParse(f[0].trim()) : null;
+    final down = f.length > 1 ? int.tryParse(f[1].trim()) : null;
+    if (up == null || down == null) {
+      _setStatsError('непонятный ответ «$s»');
+      return null;
+    }
+    _setStatsError(null);
+    if (f.length >= 3) _memoryBytes = int.tryParse(f[2].trim());
+    final pu = _prevUp, pd = _prevDown;
+    _prevUp = up;
+    _prevDown = down;
+    // Первый ответ (или ядро перезапустилось) — весь трафик сессии, дальше — прирост.
+    return (
+      up: pu == null || up < pu ? up : up - pu,
+      down: pd == null || down < pd ? down : down - pd,
+    );
   }
 
   /// Формат libv2ray: «tag,uplink,123;tag,downlink,456;» (счётчики сбрасываются при чтении).
@@ -226,27 +305,104 @@ class MobileVpnBackend implements VpnBackend {
     return (up: up, down: down);
   }
 
-  /// iPhone с включённым VPN: TCP-пинг из расширения VPN (его соединения идут мимо туннеля).
-  /// Ответ: id → мс (-1 — нет ответа); null — расширение не ответило.
-  Future<Map<String, int>?> pingInTunnel(List<ServerConfig> servers, Duration timeout) async {
-    final list = servers.map((s) => '${s.id} ${s.address} ${s.port}').join('\n');
+  /// Ответ ядра «id мс» построчно → карта.
+  static Map<String, int> parsePingReply(String reply) {
+    final out = <String, int>{};
+    for (final line in reply.split('\n')) {
+      final f = line.trim().split(' ');
+      if (f.length == 2) out[f[0]] = int.tryParse(f[1]) ?? -1;
+    }
+    return out;
+  }
+
+  /// iPhone с включённым VPN: пинг из расширения VPN — его соединения идут мимо туннеля.
+  /// [kind]: ping (TCP), icmp или proxy. null — расширение не ответило.
+  Future<Map<String, int>?> pingInTunnel(
+    String kind,
+    List<ServerConfig> servers,
+    Duration timeout, {
+    AppSettings? settings,
+    String method = 'GET',
+    String url = '',
+  }) async {
+    final String msg;
+    if (kind == 'proxy') {
+      final st = settings ?? AppSettings();
+      final batch = [
+        for (final s in servers) {'id': s.id, 'config': XrayConfigBuilder.forSingleDelay(s, st)},
+      ];
+      msg = 'proxy\n${timeout.inMilliseconds}\n$method\n$url\n${jsonEncode(batch)}';
+    } else {
+      msg = '$kind\n${timeout.inMilliseconds}\n${servers.map((s) => '${s.id} ${s.address} ${s.port}').join('\n')}';
+    }
+    final waves = kind == 'proxy' ? (servers.length / 2).ceil() : (servers.length / 8).ceil();
+    final reply = await tunnelCall(msg, timeout: timeout * (waves + 1) + const Duration(seconds: 3));
+    if (reply == null) {
+      _note('Пинг: $tunnelError');
+      return null;
+    }
+    return parsePingReply(reply);
+  }
+
+  /// iPhone с выключенным VPN: ICMP и пинг через прокси делает ядро Xray внутри приложения.
+  Future<Map<String, int>?> pingInApp(
+    String kind,
+    List<ServerConfig> servers,
+    Duration timeout, {
+    AppSettings? settings,
+    String method = 'GET',
+    String url = '',
+  }) async {
     try {
-      final reply = await _ch.invokeMethod<String>('pingTcp', {
-        'list': list,
-        'timeoutMs': timeout.inMilliseconds,
-      }).timeout(timeout * 2 + const Duration(seconds: 3));
-      if (reply == null || reply.startsWith('err:')) {
-        _note('Пинг: ${reply == null ? 'нет ответа' : reply.substring(4)}');
-        return null;
+      final String? reply;
+      if (kind == 'proxy') {
+        final st = settings ?? AppSettings();
+        final batch = [
+          for (final s in servers) {'id': s.id, 'config': XrayConfigBuilder.forSingleDelay(s, st)},
+        ];
+        reply = await _ch.invokeMethod<String>('coreProxy', {
+          'batch': jsonEncode(batch),
+          'url': url,
+          'method': method,
+          'timeoutMs': timeout.inMilliseconds,
+          'parallel': 6,
+        });
+      } else {
+        reply = await _ch.invokeMethod<String>('coreIcmp', {
+          'list': servers.map((s) => '${s.id} ${s.address} ${s.port}').join('\n'),
+          'timeoutMs': timeout.inMilliseconds,
+        });
       }
-      final out = <String, int>{};
-      for (final line in reply.split('\n')) {
-        final f = line.trim().split(' ');
-        if (f.length == 2) out[f[0]] = int.tryParse(f[1]) ?? -1;
-      }
-      return out;
+      return reply == null ? null : parsePingReply(reply);
     } catch (e) {
       _note('Пинг: $e');
+      return null;
+    }
+  }
+
+  /// Android: пинг через прокси силами libv2ray (приложение и так идёт мимо VPN).
+  Future<Map<String, int>?> proxyPingAndroid(List<ServerConfig> servers, AppSettings st, String url) async {
+    try {
+      final raw = await _ch.invokeMapMethod<String, dynamic>('proxyPing', {
+        'items': [
+          for (final s in servers) {'id': s.id, 'config': jsonEncode(XrayConfigBuilder.forSingleDelay(s, st))},
+        ],
+        'url': url,
+      });
+      return raw?.map((k, v) => MapEntry(k, (v as num).toInt()));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Версия ядра Xray (iPhone — ядро в приложении, Android — libv2ray).
+  static Future<String?> coreVersion() async {
+    try {
+      final v = await _ch.invokeMethod<String>('coreVersion');
+      if (v == null) return null;
+      final m = RegExp(r'Xray-core v?([\w.\-]+)').firstMatch(v);
+      return m?.group(1) ?? v;
+    } catch (_) {
       return null;
     }
   }
@@ -254,13 +410,12 @@ class MobileVpnBackend implements VpnBackend {
   @override
   Future<List<String>> fetchLogs() async {
     if (Plat.ios) {
-      List<String> core;
-      try {
-        core = await _ch.invokeListMethod<String>('logs').timeout(const Duration(seconds: 4)) ?? const [];
-      } catch (e) {
-        core = ['Журнал ядра доступен, когда VPN включён ($e)'];
-      }
-      return [..._diag, ...core];
+      final core = await tunnelCall('logs');
+      return [
+        ..._diag,
+        if (core != null) ...core.split('\n').where((l) => l.trim().isNotEmpty),
+        if (core == null) 'Журнал ядра доступен, когда VPN включён ($tunnelError)',
+      ];
     }
     try {
       final list = await _ch.invokeListMethod<String>('logs') ?? const [];

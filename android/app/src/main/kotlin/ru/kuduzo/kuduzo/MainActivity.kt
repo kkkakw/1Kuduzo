@@ -12,6 +12,7 @@ import android.os.Handler
 import android.os.Looper
 import java.io.ByteArrayOutputStream
 import io.flutter.embedding.android.FlutterActivity
+import libv2ray.Libv2ray
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
@@ -69,6 +70,28 @@ class MainActivity : FlutterActivity() {
                     result.success(null)
                 }
                 "stats" -> result.success(KuduzoVpnService.queryStats())
+                "coreVersion" -> result.success(try { Libv2ray.checkVersionX() } catch (e: Throwable) { null })
+                "proxyPing" -> {
+                    // Пинг через прокси: временное ядро на каждый сервер. Приложение исключено из VPN,
+                    // поэтому замер идёт напрямую к серверу.
+                    @Suppress("UNCHECKED_CAST")
+                    val items = call.argument<List<Map<String, Any?>>>("items") ?: emptyList()
+                    val url = call.argument<String>("url") ?: "https://www.gstatic.com/generate_204"
+                    Thread {
+                        val out = java.util.concurrent.ConcurrentHashMap<String, Long>()
+                        val pool = java.util.concurrent.Executors.newFixedThreadPool(4)
+                        for (item in items) {
+                            val id = item["id"] as? String ?: continue
+                            val config = item["config"] as? String ?: continue
+                            pool.execute {
+                                out[id] = try { Libv2ray.measureOutboundDelay(config, url) } catch (e: Throwable) { -1L }
+                            }
+                        }
+                        pool.shutdown()
+                        pool.awaitTermination(60, java.util.concurrent.TimeUnit.SECONDS)
+                        Handler(Looper.getMainLooper()).post { result.success(HashMap(out)) }
+                    }.start()
+                }
                 "logs" -> Thread {
                     val lines = readLogs()
                     Handler(Looper.getMainLooper()).post { result.success(lines) }

@@ -223,6 +223,15 @@ class XrayConfigBuilder {
     };
   }
 
+  /// Пинг через прокси одного сервера: только исходящие (ядро шлёт запрос через первый из них).
+  static Map<String, dynamic> forSingleDelay(ServerConfig server, AppSettings st) => {
+        'log': {'loglevel': 'none'},
+        'outbounds': [
+          outbound(server, tag: 'proxy', settings: st),
+          if (_dialer(server, st) != null) _dialerOutbound(st),
+        ],
+      };
+
   /// DNS-сервер для системного туннеля (только IP-адрес).
   static String tunnelDns(AppSettings st) => _tunDns(st);
 

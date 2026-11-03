@@ -60,6 +60,8 @@ jobs:
           export PATH="$PATH:$(go env GOPATH)/bin"
           gomobile init
           gomobile bind -target=ios -iosversion=15.0 -trimpath -ldflags='-s -w -buildid= -checklinkname=0' -o ../build/ios-core/Kuduzocore.xcframework .
+          # То же ядро нужно и самому приложению (пинг через прокси при выключенном VPN).
+          cp -R ../build/ios-core/Kuduzocore.xcframework ../packages/kuduzo_vpn_ios/ios/
       - run: bash scripts/prepare.sh ios
       - name: Network Extension
         run: |

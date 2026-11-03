@@ -1,4 +1,5 @@
 import Flutter
+import Kuduzocore
 import NetworkExtension
 import UIKit
 
@@ -75,22 +76,32 @@ public class KuduzoVpnPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
         }
       }
 
-    case "stats":
-      ask("stats") { result($0) }
-
-    case "pingTcp":
+    case "message":
+      // Команда расширению VPN (stats, logs, ping…). Ответ — текст или «err:причина».
       let args = call.arguments as? [String: Any] ?? [:]
-      let list = args["list"] as? String ?? ""
-      let timeout = args["timeoutMs"] as? Int ?? 3000
-      ask("ping\n\(timeout)\n\(list)") { result($0) }
+      ask(args["text"] as? String ?? "") { result($0) }
 
-    case "logs":
-      ask("logs") { reply in
-        if reply.hasPrefix("err:") {
-          result(["Не удалось получить журнал ядра: " + String(reply.dropFirst(4))])
+    // Ядро Xray внутри самого приложения: пинг при выключенном VPN и версия ядра.
+    case "coreVersion":
+      result(KuduzocoreVersion())
+
+    case "coreIcmp", "coreProxy":
+      let args = call.arguments as? [String: Any] ?? [:]
+      let timeout = args["timeoutMs"] as? Int ?? 5000
+      let method = call.method
+      DispatchQueue.global(qos: .userInitiated).async {
+        let reply: String
+        if method == "coreIcmp" {
+          reply = KuduzocorePingICMP(args["list"] as? String ?? "", timeout)
         } else {
-          result(reply.split(separator: "\n").map(String.init))
+          reply = KuduzocoreProxyPing(
+            args["batch"] as? String ?? "[]",
+            args["url"] as? String ?? "",
+            args["method"] as? String ?? "GET",
+            timeout,
+            args["parallel"] as? Int ?? 6)
         }
+        DispatchQueue.main.async { result(reply) }
       }
 
     case "start":
@@ -212,7 +223,7 @@ public class KuduzoVpnPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
 
   private static let tunnelKeys = [
     "dns", "mtu", "excludedRoutes", "includedRoutes", "memoryLimit", "allowLan",
-    "includeAllNetworks", "disconnectOnSleep",
+    "includeAllNetworks", "disconnectOnSleep", "ctlPort", "ctlToken",
   ]
 
   private func configure(

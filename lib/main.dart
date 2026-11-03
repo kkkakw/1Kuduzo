@@ -3,6 +3,7 @@ import 'dart:io' show exit;
 import 'dart:ui';
 
 import 'package:app_links/app_links.dart';
+import 'package:flutter/foundation.dart' show LicenseEntryWithLineBreaks, LicenseRegistry;
 import 'package:flutter/material.dart';
 
 import 'core/desktop_shell.dart' if (dart.library.js_interop) 'core/desktop_shell_web.dart';
@@ -17,6 +18,7 @@ final messengerKey = GlobalKey<ScaffoldMessengerState>();
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  _registerLicenses();
   final state = AppState();
 
   if (Plat.desktop) {
@@ -157,4 +159,40 @@ class _KuduzoAppState extends State<KuduzoApp> {
       ),
     );
   }
+}
+
+/// Лицензии компонентов, которых нет среди пакетов Dart (экран «Лицензии сторонних компонентов»).
+void _registerLicenses() {
+  LicenseRegistry.addLicense(() async* {
+    yield const LicenseEntryWithLineBreaks(['Xray-core'], '''
+Xray-core — Project X Community.
+Mozilla Public License 2.0 (MPL-2.0).
+Исходный код: https://github.com/XTLS/Xray-core
+Текст лицензии: https://www.mozilla.org/MPL/2.0/''');
+    yield const LicenseEntryWithLineBreaks(['flag-icons'], '''
+The MIT License (MIT)
+
+Copyright (c) 2013 Panayiotis Lipiridis
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.''');
+    yield const LicenseEntryWithLineBreaks(['Go, golang.org/x/net, golang.org/x/mobile'], '''
+Copyright 2009 The Go Authors.
+BSD 3-Clause License: https://go.dev/LICENSE''');
+  });
 }

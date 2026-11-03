@@ -120,7 +120,7 @@ class SettingsRoot extends StatelessWidget {
       SGroup(title: 'Расширенные настройки', children: [
         SNav(title: 'Dev Settings', onTap: () => pushPage(context, const DevPage())),
         SNav(title: 'Подписки', onTap: () => pushPage(context, const SubsPage())),
-        SNav(title: 'Пинг', value: SettingsLabels.method(st.pingMethod), onTap: () => pushPage(context, const PingPage())),
+        SNav(title: 'Пинг', value: SettingsLabels.method(Pinger.effective(st.pingMethod)), onTap: () => pushPage(context, const PingPage())),
       ]),
       SGroup(title: 'Другие настройки', children: [
         SNav(title: 'Статистика', value: onOff(st.statsEnabled), onTap: () => pushPage(context, const StatsPage())),
@@ -755,13 +755,12 @@ class PingPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = AppScope.of(context);
     final st = s.settings;
-    final effective = Pinger.available.contains(st.pingMethod) ? st.pingMethod : PingMethod.tcp;
+    final effective = Pinger.effective(st.pingMethod);
     return SettingsPage(title: 'Пинг', children: [
       SGroup(
         title: 'Протоколы пинга',
         footer: Plat.ios
-            ? 'На iPhone пинг — время TCP-соединения с сервером. При включённом VPN замер делает само расширение VPN '
-                'напрямую, мимо туннеля, поэтому числа честные.'
+            ? 'При включённом VPN замер делает само расширение VPN напрямую, мимо туннеля, поэтому числа честные.'
             : null,
         children: [
         for (final m in Pinger.available)
@@ -775,7 +774,7 @@ class PingPage extends StatelessWidget {
       ),
       SGroup(title: 'Таймаут', children: [
         SSlider(
-          title: 'Таймаут пинга',
+          title: 'Таймаут прокси-пинга',
           value: st.pingTimeoutSec.clamp(1, 15).toInt(),
           min: 1,
           max: 15,
@@ -1058,12 +1057,30 @@ class AboutPage extends StatefulWidget {
 }
 
 class _AboutPageState extends State<AboutPage> {
-  static Future<String>? _core;
+  static Future<String?>? _core;
   bool _checking = false;
+
+  /// Версия Xray: на компьютере — у программы xray, на телефоне — у ядра внутри приложения.
+  static Future<String?> _coreVersion() async {
+    if (Plat.desktop) {
+      final v = await DesktopVpnBackend.coreVersion();
+      final m = RegExp(r'(\d+\.\d+\.\d+)').firstMatch(v);
+      return m?.group(1) ?? v;
+    }
+    if (Plat.mobile) return MobileVpnBackend.coreVersion();
+    return null;
+  }
+
+  static String _short(String url) => url.replaceFirst(RegExp(r'^https?://'), '').replaceFirst(RegExp(r'/$'), '');
 
   @override
   Widget build(BuildContext context) {
     final s = AppScope.of(context);
+    // Ссылки поддержки из заголовков подписки (support-url, profile-web-page-url).
+    final support = s.subscriptions.map((x) => x.supportUrl).firstWhere((u) => u.isNotEmpty, orElse: () => '');
+    final webPage = s.subscriptions.map((x) => x.webPageUrl).firstWhere((u) => u.isNotEmpty, orElse: () => '');
+    final telegram = supportTelegram.isNotEmpty ? supportTelegram : (support.contains('t.me/') ? support : '');
+
     return SettingsPage(title: 'О приложении', children: [
       Padding(
         padding: const EdgeInsets.symmetric(vertical: 18),
@@ -1077,19 +1094,40 @@ class _AboutPageState extends State<AboutPage> {
           ),
           const SizedBox(height: 12),
           const Text('Kuduzo VPN', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
-          const SizedBox(height: 4),
-          Text('версия $appVersion', style: TextStyle(color: K.muted)),
         ]),
       ),
-      SGroup(children: [
-        if (Plat.desktop)
-          FutureBuilder<String>(
-            future: _core ??= DesktopVpnBackend.coreVersion(),
-            builder: (_, snap) => SInfo(title: 'Ядро', value: snap.data ?? '…'),
-          )
-        else
-          const SInfo(title: 'Ядро', value: 'Xray-core'),
+      SGroup(title: 'Информация', children: [
+        FutureBuilder<String?>(
+          future: _core ??= _coreVersion(),
+          builder: (_, snap) => SInfo(
+            title: 'Версия Xray',
+            value: snap.connectionState == ConnectionState.done ? (snap.data ?? 'Xray-core') : '…',
+          ),
+        ),
+        SInfo(title: 'Версия приложения', value: appVersion),
+        SInfo(title: 'Сборка', value: '$appBuild'),
         SInfo(title: 'ID устройства', value: s.deviceId, copy: true),
+      ]),
+      SGroup(title: 'Ссылки', children: [
+        if (termsUrl.isNotEmpty) SNav(title: 'Условия использования', onTap: () => openUrl(termsUrl)),
+        if (privacyUrl.isNotEmpty) SNav(title: 'Политика конфиденциальности', onTap: () => openUrl(privacyUrl)),
+        SNav(
+          title: 'Лицензии сторонних компонентов',
+          onTap: () => showLicensePage(
+            context: context,
+            applicationName: 'Kuduzo VPN',
+            applicationVersion: '$appVersion ($appBuild)',
+          ),
+        ),
+        _LinkRow(title: 'Сайт', value: 'vpnkuduzo.ru', onTap: () => openUrl('https://vpnkuduzo.ru')),
+        if (webPage.isNotEmpty) _LinkRow(title: 'Моя подписка', value: _short(webPage), onTap: () => openUrl(webPage)),
+        if (supportEmail.isNotEmpty)
+          _LinkRow(title: 'Email', value: supportEmail, onTap: () => openUrl('mailto:$supportEmail')),
+        if (telegram.isNotEmpty) _LinkRow(title: 'Telegram', value: _short(telegram), onTap: () => openUrl(telegram)),
+        if (support.isNotEmpty && support != telegram)
+          _LinkRow(title: 'Поддержка', value: _short(support), onTap: () => openUrl(support)),
+        if (telegramGroup.isNotEmpty)
+          _LinkRow(title: 'Telegram-группа', value: _short(telegramGroup), onTap: () => openUrl(telegramGroup)),
       ]),
       SGroup(children: [
         if (s.updateVersion != null)
@@ -1107,14 +1145,50 @@ class _AboutPageState extends State<AboutPage> {
               if (context.mounted) toast(context, s.updateVersion == null ? 'У вас последняя версия' : 'Доступна версия ${s.updateVersion}');
             },
           ),
-        SAction(title: 'Сайт vpnkuduzo.ru', icon: Icons.open_in_new_rounded, onTap: () => openUrl('https://vpnkuduzo.ru')),
       ]),
-      const SGroup(
-        footer: 'Ядро: Xray-core (MPL-2.0). Флаги стран: flag-icons (MIT, Panayiotis Lipiridis).',
-        children: [],
+      Padding(
+        padding: const EdgeInsets.fromLTRB(24, 4, 24, 8),
+        child: Text(
+          'Kuduzo VPN подключается только к серверам из ваших подписок и ключей. '
+          'Подписки, настройки и журналы хранятся на этом устройстве.',
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 14, color: K.muted, height: 1.4),
+        ),
       ),
     ]);
   }
+}
+
+/// Строка-ссылка: название слева, адрес цветом акцента справа (как в Happ).
+class _LinkRow extends StatelessWidget {
+  const _LinkRow({required this.title, required this.value, required this.onTap});
+  final String title;
+  final String value;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+        onTap: () {
+          haptic(context);
+          onTap();
+        },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
+          child: Row(children: [
+            Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                value,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.right,
+                style: TextStyle(fontSize: 15, color: K.accent, fontWeight: FontWeight.w500),
+              ),
+            ),
+          ]),
+        ),
+      );
 }
 
 class _CopyRow extends StatelessWidget {
