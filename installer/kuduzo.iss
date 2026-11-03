@@ -62,15 +62,20 @@ Root: HKCU; Subkey: "Software\Classes\kuduzo\shell\open\command"; ValueType: str
 Filename: "{app}\{#MyAppExe}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall
 
 [UninstallRun]
-Filename: "{sys}\taskkill.exe"; Parameters: "/f /im xray.exe"; Flags: runhidden; RunOnceId: "KillXray"
+; Закрываем только ядро из папки Kuduzo — xray.exe других программ не трогаем.
+Filename: "powershell.exe"; Parameters: "-NoProfile -NonInteractive -Command ""Get-Process xray -ErrorAction SilentlyContinue | Where-Object {{ $_.Path -like '{app}\*' } | Stop-Process -Force"""; Flags: runhidden; RunOnceId: "KillXray"
 Filename: "{sys}\taskkill.exe"; Parameters: "/f /im {#MyAppExe}"; Flags: runhidden; RunOnceId: "KillApp"
 
 [Code]
-// Перед установкой закрываем ядро Xray: иначе его файл занят и не обновится.
+// Перед установкой закрываем ядро Xray из папки Kuduzo: иначе его файл занят и не обновится.
+// xray.exe других программ (v2rayN и т. п.) не трогаем.
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   Code: Integer;
 begin
-  Exec(ExpandConstant('{sys}\taskkill.exe'), '/f /im xray.exe', '', SW_HIDE, ewWaitUntilTerminated, Code);
+  Exec('powershell.exe',
+    '-NoProfile -NonInteractive -Command "Get-Process xray -ErrorAction SilentlyContinue | ' +
+    'Where-Object { $_.Path -like ''' + ExpandConstant('{app}') + '\*'' } | Stop-Process -Force"',
+    '', SW_HIDE, ewWaitUntilTerminated, Code);
   Result := '';
 end;

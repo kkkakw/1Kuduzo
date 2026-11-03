@@ -36,6 +36,7 @@ class XrayConfigBuilder {
     bool lite = false, // iOS: без geosite.dat — расширению VPN доступно ~50 МБ памяти
     bool stats = false, // счётчики трафика (скорость на главном экране)
     bool statsApi = false, // компьютер: gRPC API для `xray api statsquery`
+    int? apiListenPort, // порт API, если стандартный занят другой программой
   }) {
     final st = settings ?? AppSettings();
     final sniffing = {
@@ -149,7 +150,7 @@ class XrayConfigBuilder {
       if (stats && statsApi)
         'api': {
           'tag': 'api',
-          'listen': '127.0.0.1:$apiPort',
+          'listen': '127.0.0.1:${apiListenPort ?? apiPort}',
           'services': ['StatsService'],
         },
       'inbounds': inbounds,

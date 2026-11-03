@@ -476,6 +476,50 @@ class DesktopVpnBackend implements VpnBackend {
   bool _stopping = false;
   final List<String> _logs = [];
 
+  /// Порт API статистики текущего запуска (стандартный может быть занят другой программой).
+  int _apiPort = XrayConfigBuilder.apiPort;
+
+  /// Свободен ли порт на 127.0.0.1.
+  static Future<bool> _portFree(int port) async {
+    try {
+      final s = await ServerSocket.bind(InternetAddress.loopbackIPv4, port);
+      await s.close();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Предпочитаемый порт, если свободен; иначе ближайший свободный после него; иначе любой свободный.
+  static Future<int> _pickPort(int preferred, Set<int> taken) async {
+    for (var p = preferred; p < preferred + 40 && p < 65535; p++) {
+      if (!taken.contains(p) && await _portFree(p)) return p;
+    }
+    final s = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final p = s.port;
+    await s.close();
+    return p;
+  }
+
+  /// Закрыть «своё» ядро, оставшееся от прошлого запуска (программа упала или обновлялась).
+  /// Трогаем только xray из папки Kuduzo — ядра других программ (v2rayN и т. п.) не закрываем.
+  static Future<void> _killOrphanCore() async {
+    final path = xrayPath();
+    try {
+      if (Platform.isWindows) {
+        final escaped = path.replaceAll("'", "''");
+        await Process.run('powershell', [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          "Get-Process xray -ErrorAction SilentlyContinue | Where-Object { \$_.Path -eq '$escaped' } | Stop-Process -Force",
+        ]).timeout(const Duration(seconds: 8));
+      } else {
+        await Process.run('pkill', ['-f', path]).timeout(const Duration(seconds: 5));
+      }
+    } catch (_) {}
+  }
+
   @override
   List<String> get logs => List.unmodifiable(_logs);
 
@@ -489,7 +533,7 @@ class DesktopVpnBackend implements VpnBackend {
       final r = await Process.run(xrayPath(), [
         'api',
         'statsquery',
-        '--server=127.0.0.1:${XrayConfigBuilder.apiPort}',
+        '--server=127.0.0.1:$_apiPort',
         '-pattern',
         'outbound>>>proxy>>>',
         '-reset',
@@ -573,14 +617,32 @@ class DesktopVpnBackend implements VpnBackend {
       return;
     }
 
+    await _killOrphanCore();
+
+    // Порты этого запуска: если стандартные заняты другой программой (v2rayN, INCY и т. п.),
+    // берём ближайшие свободные. Системный прокси настраивается на них же.
+    final base = settings ?? AppSettings();
+    final run = AppSettings.decode(base.encode());
+    final taken = <int>{};
+    run.socksPort = await _pickPort(base.socksPort, taken);
+    taken.add(run.socksPort);
+    run.httpPort = await _pickPort(base.httpPort, taken);
+    taken.add(run.httpPort);
+    _apiPort = await _pickPort(XrayConfigBuilder.apiPort, taken);
+    if (run.socksPort != base.socksPort) _log('порт ${base.socksPort} занят другой программой — SOCKS на ${run.socksPort}');
+    if (run.httpPort != base.httpPort) _log('порт ${base.httpPort} занят другой программой — HTTP на ${run.httpPort}');
+    if (_apiPort != XrayConfigBuilder.apiPort) _log('порт ${XrayConfigBuilder.apiPort} занят — статистика на $_apiPort');
+
     final inbound = tun ? InboundMode.tunDesktop : InboundMode.proxy;
     final config = XrayConfigBuilder.build(server,
         routing: routing,
         inbound: inbound,
-        settings: settings,
+        settings: run,
         windows: Platform.isWindows,
         stats: true,
-        statsApi: true);
+        statsApi: true,
+        apiListenPort: _apiPort);
+
     final dir = await getApplicationSupportDirectory();
     final cfgFile = File('${dir.path}${Platform.pathSeparator}config.json');
     await cfgFile.writeAsString(jsonEncode(config));
@@ -633,8 +695,7 @@ class DesktopVpnBackend implements VpnBackend {
 
     if (!tun) {
       try {
-        final st = settings ?? AppSettings();
-        await SystemProxy.enable('127.0.0.1', st.httpPort, st.socksPort);
+        await SystemProxy.enable('127.0.0.1', run.httpPort, run.socksPort);
         _proxySet = true;
       } catch (e) {
         _ctrl.add(VpnStatus(VpnState.error, 'Не удалось включить системный прокси: $e'));
