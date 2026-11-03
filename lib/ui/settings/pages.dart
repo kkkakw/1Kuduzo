@@ -1109,8 +1109,19 @@ class _AboutPageState extends State<AboutPage> {
         SInfo(title: 'ID устройства', value: s.deviceId, copy: true),
       ]),
       SGroup(title: 'Ссылки', children: [
-        if (termsUrl.isNotEmpty) SNav(title: 'Условия использования', onTap: () => openUrl(termsUrl)),
-        if (privacyUrl.isNotEmpty) SNav(title: 'Политика конфиденциальности', onTap: () => openUrl(privacyUrl)),
+        SNav(
+          title: 'Условия использования',
+          onTap: () => pushPage(context, const LegalPage(title: 'Условия использования', asset: 'assets/legal/terms.md')),
+        ),
+        SNav(
+          title: 'Политика конфиденциальности',
+          onTap: () =>
+              pushPage(context, const LegalPage(title: 'Политика конфиденциальности', asset: 'assets/legal/privacy.md')),
+        ),
+        SNav(
+          title: 'Согласие на обработку данных',
+          onTap: () => pushPage(context, const LegalPage(title: 'Согласие', asset: 'assets/legal/consent.md')),
+        ),
         SNav(
           title: 'Лицензии сторонних компонентов',
           onTap: () => showLicensePage(
@@ -1123,11 +1134,11 @@ class _AboutPageState extends State<AboutPage> {
         if (webPage.isNotEmpty) _LinkRow(title: 'Моя подписка', value: _short(webPage), onTap: () => openUrl(webPage)),
         if (supportEmail.isNotEmpty)
           _LinkRow(title: 'Email', value: supportEmail, onTap: () => openUrl('mailto:$supportEmail')),
-        if (telegram.isNotEmpty) _LinkRow(title: 'Telegram', value: _short(telegram), onTap: () => openUrl(telegram)),
-        if (support.isNotEmpty && support != telegram)
-          _LinkRow(title: 'Поддержка', value: _short(support), onTap: () => openUrl(support)),
-        if (telegramGroup.isNotEmpty)
-          _LinkRow(title: 'Telegram-группа', value: _short(telegramGroup), onTap: () => openUrl(telegramGroup)),
+        if (telegram.isNotEmpty) _LinkRow(title: 'Поддержка', value: _short(telegram), onTap: () => openUrl(telegram)),
+        if (support.isNotEmpty && _short(support) != _short(telegram))
+          _LinkRow(title: 'Поддержка подписки', value: _short(support), onTap: () => openUrl(support)),
+        if (telegramChannel.isNotEmpty)
+          _LinkRow(title: 'Канал', value: _short(telegramChannel), onTap: () => openUrl(telegramChannel)),
       ]),
       SGroup(children: [
         if (s.updateVersion != null)
@@ -1154,6 +1165,65 @@ class _AboutPageState extends State<AboutPage> {
           textAlign: TextAlign.center,
           style: TextStyle(fontSize: 14, color: K.muted, height: 1.4),
         ),
+      ),
+    ]);
+  }
+}
+
+/// Документ из assets/legal: «# » — заголовок, «## » — раздел, «- » — пункт списка.
+class LegalPage extends StatelessWidget {
+  const LegalPage({super.key, required this.title, required this.asset});
+  final String title;
+  final String asset;
+
+  @override
+  Widget build(BuildContext context) {
+    return SettingsPage(title: title, children: [
+      FutureBuilder<String>(
+        future: DefaultAssetBundle.of(context).loadString(asset),
+        builder: (context, snap) {
+          if (!snap.hasData) {
+            return const Padding(
+              padding: EdgeInsets.all(40),
+              child: Center(child: CircularProgressIndicator.adaptive()),
+            );
+          }
+          final blocks = <Widget>[];
+          for (final raw in snap.data!.split('\n')) {
+            final line = raw.trimRight();
+            if (line.isEmpty) continue;
+            if (line.startsWith('# ')) {
+              blocks.add(Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Text(line.substring(2), style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, height: 1.2)),
+              ));
+            } else if (line.startsWith('## ')) {
+              blocks.add(Padding(
+                padding: const EdgeInsets.only(top: 18, bottom: 6),
+                child: Text(line.substring(3), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+              ));
+            } else if (line.startsWith('- ')) {
+              blocks.add(Padding(
+                padding: const EdgeInsets.only(left: 6, bottom: 6),
+                child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('•  ', style: TextStyle(fontSize: 15, color: K.accent, height: 1.45)),
+                  Expanded(child: Text(line.substring(2), style: TextStyle(fontSize: 15, color: K.text2, height: 1.45))),
+                ]),
+              ));
+            } else {
+              blocks.add(Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(line, style: TextStyle(fontSize: 15, color: K.text2, height: 1.45)),
+              ));
+            }
+          }
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(6, 4, 6, 24),
+            child: SelectionArea(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: blocks),
+            ),
+          );
+        },
       ),
     ]);
   }

@@ -219,4 +219,12 @@ void main() {
     final r = MobileVpnBackend.parsePingReply('a1 120\nb2 -1\nмусор\n');
     expect(r, {'a1': 120, 'b2': -1});
   });
+
+  test('документы для раздела «О приложении» на месте', () {
+    for (final f in ['terms', 'privacy', 'consent']) {
+      final text = File('assets/legal/$f.md').readAsStringSync();
+      expect(text.startsWith('# '), isTrue, reason: f);
+      expect(text.contains('t.me/kuduzohelpbot'), isTrue, reason: f);
+    }
+  });
 }
